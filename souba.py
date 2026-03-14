@@ -106,7 +106,7 @@ for name, val, change, pct, is_rate in items:
 html = f"""<html><body style='font-family:sans-serif;background:#f5f5f5;padding:20px;'>
 <div style='max-width:480px;margin:0 auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.1);'>
 <div style='background:#1a237e;color:#fff;padding:16px 20px;'>
-<h2 style='margin:0;font-size:18px;'>本日の始動データ</h2>
+<h2 style='margin:0;font-size:18px;'>最新マーケットデータ</h2>
 <p style='margin:4px 0 0;font-size:13px;opacity:0.8;'>{now_str} JST</p>
 </div>
 <table style='width:100%;border-collapse:collapse;font-size:14px;'>
