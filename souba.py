@@ -8,25 +8,15 @@ import re
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-import gspread
-from google.oauth2.service_account import Credentials
-import json
 import os
 
-# ========================================
-# 環境変数から取得（GitHubに直接書かない）
 GMAIL_ADDRESS  = os.environ['GMAIL_ADDRESS']
 GMAIL_APP_PASS = os.environ['GMAIL_APP_PASS']
 SEND_TO        = os.environ['SEND_TO']
-SHEET_ID       = os.environ['SHEET_ID']
-GOOGLE_CREDS   = os.environ['GOOGLE_CREDS']
-# ========================================
 
 jst = pytz.timezone('Asia/Tokyo')
 now = datetime.now(jst)
 now_str = now.strftime('%Y-%m-%d %H:%M')
-today   = now.strftime('%Y-%m-%d')
-
 print(f"実行開始: {now_str}")
 
 headers = {
@@ -35,7 +25,7 @@ headers = {
     "Referer": "https://jp.investing.com/"
 }
 
-# --- 日本10年債金利 ---
+# 日本10年債金利
 jgb_val = None
 jgb_change = "-"
 jgb_pct = "-"
@@ -45,15 +35,17 @@ try:
     curr_tag   = soup_inv.find('div', {'data-test': 'instrument-price-last'})
     change_tag = soup_inv.find('span', {'data-test': 'instrument-price-change'})
     pct_tag    = soup_inv.find('span', {'data-test': 'instrument-price-change-percent'})
-    if curr_tag:   jgb_val    = float(curr_tag.get_text(strip=True))
+    if curr_tag:
+        jgb_val = float(curr_tag.get_text(strip=True))
     if change_tag:
         chg = float(change_tag.get_text(strip=True))
         jgb_change = f"{chg:+.3f}"
-    if pct_tag:    jgb_pct = pct_tag.get_text(strip=True).strip('()')
+    if pct_tag:
+        jgb_pct = pct_tag.get_text(strip=True).strip('()')
 except Exception as e:
     print(f"JGB取得エラー: {e}")
 
-# --- yFinanceでデータ取得 ---
+# yFinanceでデータ取得
 def get_yf(symbol, is_rate=False):
     try:
         df = yf.Ticker(symbol).history(period="5d")
@@ -82,53 +74,23 @@ tnx,    tnx_c,    tnx_p    = get_yf("^TNX",   is_rate=True)
 oil,    oil_c,    oil_p    = get_yf("CL=F")
 gold,   gold_c,   gold_p   = get_yf("GC=F")
 
-# --- スプレッドシートに追記 ---
-try:
-    creds_dict = json.loads(GOOGLE_CREDS)
-    creds = Credentials.from_service_account_info(creds_dict, scopes=[
-        "https://spreadsheets.google.com/feeds",
-        "https://www.googleapis.com/auth/drive"
-    ])
-    gc = gspread.authorize(creds)
-    sh = gc.open_by_key(SHEET_ID)
-    ws = sh.worksheet("日次データ")
-    ws.append_row([
-        today,
-        round(dow,    1) if dow    else "取得失敗",
-        round(sp,     1) if sp     else "取得失敗",
-        round(nasdaq, 1) if nasdaq else "取得失敗",
-        round(usdjpy, 3) if usdjpy else "取得失敗",
-        round(nikkei, 1) if nikkei else "取得失敗",
-        round(growth, 1) if growth else "取得失敗",
-        round(nkfut,  1) if nkfut  else "取得失敗",
-        round(jgb_val,3) if jgb_val else "取得失敗",
-        round(vix,    3) if vix    else "取得失敗",
-        round(tnx,    3) if tnx    else "取得失敗",
-        round(oil,    1) if oil    else "取得失敗",
-        round(gold,   1) if gold   else "取得失敗",
-    ])
-    print("スプレッドシートに追記しました")
-except Exception as e:
-    print(f"スプレッドシートエラー: {e}")
-
-# --- メール送信 ---
 def fmt(val, is_rate=False):
     if val is None: return "取得失敗"
     return f"{val:.3f}" if is_rate else f"{val:,.1f}"
 
 items = [
-    ("ダウ平均",       fmt(dow),    dow_c,    dow_p,    False),
-    ("S&P 500",        fmt(sp),     sp_c,     sp_p,     False),
-    ("Nasdaq",         fmt(nasdaq), nasdaq_c, nasdaq_p, False),
-    ("ドル円",         fmt(usdjpy, True), fx_c, fx_p,   True),
-    ("日経平均(現物)", fmt(nikkei), nk_c,     nk_p,     False),
-    ("東証グロース",   fmt(growth), gr_c,     gr_p,     False),
-    ("日経先物",       fmt(nkfut),  nf_c,     nf_p,     False),
+    ("ダウ平均",       fmt(dow),              dow_c,    dow_p,    False),
+    ("S&P 500",        fmt(sp),               sp_c,     sp_p,     False),
+    ("Nasdaq",         fmt(nasdaq),           nasdaq_c, nasdaq_p, False),
+    ("ドル円",         fmt(usdjpy, True),     fx_c,     fx_p,     True),
+    ("日経平均(現物)", fmt(nikkei),           nk_c,     nk_p,     False),
+    ("東証グロース",   fmt(growth),           gr_c,     gr_p,     False),
+    ("日経先物",       fmt(nkfut),            nf_c,     nf_p,     False),
     ("日本10年債金利", f"{jgb_val:.3f}" if jgb_val else "取得失敗", jgb_change, jgb_pct, True),
-    ("VIX指数",        fmt(vix, True),  vix_c, vix_p,  True),
-    ("米10年債金利",   fmt(tnx, True),  tnx_c, tnx_p,  True),
-    ("WTI原油",        fmt(oil),    oil_c,    oil_p,    False),
-    ("金先物",         fmt(gold),   gold_c,   gold_p,   False),
+    ("VIX指数",        fmt(vix,   True),      vix_c,    vix_p,    True),
+    ("米10年債金利",   fmt(tnx,   True),      tnx_c,    tnx_p,    True),
+    ("WTI原油",        fmt(oil),              oil_c,    oil_p,    False),
+    ("金先物",         fmt(gold),             gold_c,   gold_p,   False),
 ]
 
 rows = ""
@@ -170,6 +132,9 @@ try:
         smtp.starttls()
         smtp.login(GMAIL_ADDRESS, GMAIL_APP_PASS)
         smtp.sendmail(GMAIL_ADDRESS, SEND_TO, msg.as_bytes())
+    print("メール送信完了！")
+except Exception as e:
+    print(f"メール送信失敗: {e}")
     print("メール送信完了！")
 except Exception as e:
     print(f"メール送信失敗: {e}")
