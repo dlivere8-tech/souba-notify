@@ -258,6 +258,7 @@ for name, val, change, pct, is_rate in items:
         <td style='padding:8px 12px;border-bottom:1px solid #eee;text-align:right;color:{color};font-weight:bold;'>{pct}</td>
     </tr>"""
 
+# ▼ ここで前半のHTMLを一度しっかり閉じます ▼
 html = f"""<html><body style='font-family:sans-serif;background:#f5f5f5;padding:20px;'>
 <div style='max-width:480px;margin:0 auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.1);'>
 <div style='background:#1a237e;color:#fff;padding:16px 20px;'>
@@ -273,7 +274,7 @@ html = f"""<html><body style='font-family:sans-serif;background:#f5f5f5;padding:
 </tr></thead>
 <tbody>{rows}</tbody></table>
 <p style='padding:12px 16px;font-size:11px;color:#999;margin:0;'>投資判断はご自身の責任でお願いします</p>
-""" # ← ここに閉じるためのトリプルクォートを追加
+"""
 
 dt_rows = ""
 for i, d in enumerate(detail_results):
@@ -284,30 +285,25 @@ for i, d in enumerate(detail_results):
     trend_color = "#d32f2f" if d['trend'] == '上昇' else "#1565c0"
     dt_rows += (
         "<tr>"
-        "<td style='padding:6px 12px;border-bottom:1px solid #eee;font-weight:bold;'>"
-        f"{i+1}. {d['name']}({d['code']})</td>"
-        "<td style='padding:6px 12px;border-bottom:1px solid #eee;text-align:right;'>"
-        f"{d['price']:,.0f}円</td>"
-        f"<td style='padding:6px 12px;border-bottom:1px solid #eee;text-align:right;color:{rsi_color};'>"
-        f"{d['rsi']:.1f}</td>"
-        f"<td style='padding:6px 12px;border-bottom:1px solid #eee;text-align:right;color:{trend_color};'>"
-        f"{d['trend']}</td>"
-        "<td style='padding:6px 12px;border-bottom:1px solid #eee;text-align:right;'>"
-        f"{sup_str}</td>"
-        "<td style='padding:6px 12px;border-bottom:1px solid #eee;text-align:right;'>"
-        f"{res_str}</td>"
-        "<td style='padding:6px 12px;border-bottom:1px solid #eee;text-align:right;font-weight:bold;'>"
-        f"{rr_str}</td>"
+        f"<td style='padding:6px 12px;border-bottom:1px solid #eee;font-weight:bold;'>{i+1}. {d['name']}({d['code']})</td>"
+        f"<td style='padding:6px 12px;border-bottom:1px solid #eee;text-align:right;'>{d['price']:,.0f}円</td>"
+        f"<td style='padding:6px 12px;border-bottom:1px solid #eee;text-align:right;color:{rsi_color};'>{d['rsi']:.1f}</td>"
+        f"<td style='padding:6px 12px;border-bottom:1px solid #eee;text-align:right;color:{trend_color};'>{d['trend']}</td>"
+        f"<td style='padding:6px 12px;border-bottom:1px solid #eee;text-align:right;'>{sup_str}</td>"
+        f"<td style='padding:6px 12px;border-bottom:1px solid #eee;text-align:right;'>{res_str}</td>"
+        f"<td style='padding:6px 12px;border-bottom:1px solid #eee;text-align:right;font-weight:bold;'>{rr_str}</td>"
         "</tr>"
     )
 
-dt_section = "<div style=\"margin-top:16px;padding:16px;background:#e8f5e9;\"><h2>今日のデイトレ推奨銘柄</h2><p>前日終値ベース</p>" + dt_rows + "</div>"
+# デイトレ銘柄のブロックを作成
+dt_section = "<div style=\"margin-top:16px;padding:16px;background:#e8f5e9;\"><h2>今日のデイトレ推奨銘柄</h2><p>前日終値ベース</p><table style='width:100%;border-collapse:collapse;font-size:12px;'>" + dt_rows + "</table></div>"
 
-# dt_sectionと全体の閉じタグをhtmlに結合する
+# ▼ 前半のHTMLに、デイトレ銘柄ブロックと最後の閉じタグを追加して合体 ▼
 html += f"""
 {dt_section}
 </div>
-</body></html>"""
+</body></html>
+"""
 
 msg = MIMEMultipart('alternative')
 msg['From']    = GMAIL_ADDRESS
