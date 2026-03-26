@@ -287,14 +287,25 @@ print(f"rawデータ収集完了：{len(all_results)}銘柄")
 # ========================================
 # 改善⑦：相対評価でスイングスコアを確定
 # ========================================
-from scipy import stats as _stats
-
 def rank_score(values, higher_is_better=True, max_pts=35):
-    """順位ベースで0〜max_ptsの点数リストを返す（同値は平均順位）"""
+    """順位ベースで0〜max_ptsの点数リストを返す（同値は平均順位、numpy実装）"""
     n = len(values)
     if n <= 1:
         return [max_pts] * n
-    ranks = _stats.rankdata(values)          # 昇順1〜n
+    arr = np.array(values, dtype=float)
+    # 同値に平均順位を付与（scipy.rankdataと同等）
+    order = np.argsort(arr)
+    ranks = np.empty(n, dtype=float)
+    ranks[order] = np.arange(1, n + 1, dtype=float)
+    # 同値グループを平均順位に置き換え
+    i = 0
+    while i < n:
+        j = i
+        while j < n and arr[order[j]] == arr[order[i]]:
+            j += 1
+        avg = (i + 1 + j) / 2.0
+        ranks[order[i:j]] = avg
+        i = j
     if higher_is_better:
         return [(r - 1) / (n - 1) * max_pts for r in ranks]
     else:
