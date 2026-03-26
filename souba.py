@@ -281,7 +281,7 @@ for i, d in enumerate(detail_results):
     rsi_color = "#d32f2f" if d['rsi'] < 30 else "#1565c0" if d['rsi'] > 70 else "#333"
     trend_color = "#d32f2f" if d['trend'] == '上昇' else "#1565c0"
     dt_rows += f"""<tr>
-        <td style='padding:6px 12px;border-bottom:1px solid #eee;font-weight:bold;'>{i+1}. {d['name']}（{d['code']}）</td>
+        <td style='padding:6px 12px;border-bottom:1px solid #eee;font-weight:bold;'>{i+1}. {d['name']}({d['code']})</td>
         <td style='padding:6px 12px;border-bottom:1px solid #eee;text-align:right;'>¥{d['price']:,.0f}</td>
         <td style='padding:6px 12px;border-bottom:1px solid #eee;text-align:right;color:{rsi_color};'>{d['rsi']:.1f}</td>
         <td style='padding:6px 12px;border-bottom:1px solid #eee;text-align:right;color:{trend_color};'>{d['trend']}</td>
