@@ -152,18 +152,17 @@ for v in volume_scores:
 print(f"上位50銘柄選出完了")
 
 # ========================================
-# STEP 2：データ取得1回で全スコアを計算
+# STEP 2：データ取得1回でraw値を収集
 # ========================================
-def calc_all_scores(code, name):
+def calc_raw(code, name):
+    """スイングのtrend/RRは後で相対評価するためraw値を返す"""
     try:
-        # データ取得は1回のみ
         df = yf.Ticker(f"{code}.T").history(period="3mo")
         if df.empty or len(df) < 20:
             return None
         df.index = pd.to_datetime(df.index).tz_localize(None)
         df = df.reset_index()
 
-        # テクニカル指標
         df['RSI']  = ta.rsi(df['Close'], length=14)
         df['MA25'] = df['Close'].rolling(25).mean()
         df['MA75'] = df['Close'].rolling(75).mean()
@@ -174,29 +173,22 @@ def calc_all_scores(code, name):
         curr   = latest['Close']
         rsi    = latest['RSI'] if not pd.isna(latest['RSI']) else 50
 
-        # 改善⑤：前日比%
-        if len(df) >= 2:
-            prev_close = df.iloc[-2]['Close']
-            change_pct = (curr - prev_close) / prev_close * 100
+        # 前日比%
+        change_pct = (curr - df.iloc[-2]['Close']) / df.iloc[-2]['Close'] * 100 if len(df) >= 2 else 0.0
+
+        # 改善⑦：MA乖離率（プラス=上昇トレンド強い、マイナス=下落トレンド強い）
+        ma25 = latest['MA25']
+        ma75 = latest['MA75']
+        if not pd.isna(ma25) and not pd.isna(ma75) and ma75 != 0:
+            ma_divergence = (ma25 - ma75) / ma75 * 100
         else:
-            prev_close = curr
-            change_pct = 0.0
+            ma_divergence = 0.0
+        trend_up = ma_divergence > 0
+        trend    = '上昇' if trend_up else '下落'
 
-        trend_up = (
-            latest['MA25'] > latest['MA75']
-            if not pd.isna(latest['MA25']) and not pd.isna(latest['MA75'])
-            else False
-        )
-        trend = '上昇' if trend_up else '下落'
-
-        # ========================================
-        # 出来高プロファイルで節目計算（買い用）
-        # 損切り = sup（現在値より下）、利確 = res（現在値より上）
-        # ========================================
-        sup_buy = None
-        res_buy = None
-        rr_buy  = 0.0
-
+        # 出来高プロファイルで節目計算
+        sup_buy_p = res_buy_p = sup_sell_p = res_sell_p = None
+        rr_buy = rr_sell = 0.0
         try:
             bin_result  = pd.cut(df['Close'], bins=10, labels=False, retbins=True)
             pbins       = bin_result[0]
@@ -206,39 +198,19 @@ def calc_all_scores(code, name):
             top5        = vol_by_bin.nlargest(5).index
             hvn         = sorted([bin_centers[i] for i in top5 if i < len(bin_centers)])
 
-            sup_buy = max([p for p in hvn if p < curr], default=None)
-            res_buy = min([p for p in hvn if p > curr], default=None)
+            sup_buy_p = max([p for p in hvn if p < curr], default=None)
+            res_buy_p = min([p for p in hvn if p > curr], default=None)
+            if sup_buy_p and res_buy_p and curr != sup_buy_p:
+                rr_buy = abs(res_buy_p - curr) / abs(curr - sup_buy_p)
 
-            if sup_buy and res_buy and curr != sup_buy:
-                rr_buy = abs(res_buy - curr) / abs(curr - sup_buy)
-            else:
-                rr_buy = 0.0
-        except:
-            hvn = []
-
-        # ========================================
-        # 出来高プロファイルで節目計算（売り用）
-        # 損切り = res（現在値より上）、利確 = sup（現在値より下）
-        # ========================================
-        sup_sell = None   # 売りの利確（現在値より下）
-        res_sell = None   # 売りの損切り（現在値より上）
-        rr_sell  = 0.0
-
-        try:
-            if hvn:
-                res_sell = min([p for p in hvn if p > curr], default=None)  # 損切り（上）
-                sup_sell = max([p for p in hvn if p < curr], default=None)  # 利確（下）
-
-                if res_sell and sup_sell and curr != res_sell:
-                    rr_sell = abs(curr - sup_sell) / abs(res_sell - curr)
-                else:
-                    rr_sell = 0.0
+            res_sell_p = min([p for p in hvn if p > curr], default=None)  # 売り損切り（上）
+            sup_sell_p = max([p for p in hvn if p < curr], default=None)  # 売り利確（下）
+            if res_sell_p and sup_sell_p and curr != res_sell_p:
+                rr_sell = abs(curr - sup_sell_p) / abs(res_sell_p - curr)
         except:
             pass
 
-        # ----------------------------------------
-        # デイトレスコア（最大100点）
-        # ----------------------------------------
+        # デイトレスコア（絶対評価のまま）
         atr_val   = atr.iloc[-1] if atr is not None and not atr.isna().all() else 0
         atr_pct   = atr_val / curr * 100
         avg_range = ((recent['High'] - recent['Low']) / recent['Close'] * 100).mean()
@@ -254,120 +226,115 @@ def calc_all_scores(code, name):
             price_s * 10
         )
 
-        # 改善②：デイトレはRRが算出できない銘柄を除外
-        # （sup_buy/res_buy どちらかが None なら除外）
-        dt_rr_valid = (sup_buy is not None and res_buy is not None and rr_buy > 0)
+        dt_rr_valid  = (sup_buy_p is not None and res_buy_p is not None and rr_buy > 0)
+        dt_direction = "↑買い目線" if change_pct >= 0 else "↓売り目線"
+        dt_dir_color = "#d32f2f"   if change_pct >= 0 else "#1565c0"
 
-        # 改善④：デイトレ方向（前日比で判定）
-        if change_pct >= 0:
-            dt_direction = "↑買い目線"
-            dt_dir_color = "#d32f2f"
-        else:
-            dt_direction = "↓売り目線"
-            dt_dir_color = "#1565c0"
-
-        # ----------------------------------------
-        # 改善①：買いスコア（最大100点）
-        # ----------------------------------------
-        # トレンドスコア（35点）：上昇トレンドで満点
-        buy_trend_score = 35 if trend_up else 0
-
-        # RSIスコア（35点）：40〜60満点、70超は0点
+        # RSIスコア（絶対評価のまま）
         if 40 <= rsi <= 60:
-            buy_rsi_score = 35
+            buy_rsi_score  = 35;  sell_rsi_score = 35
         elif 30 <= rsi < 40:
-            buy_rsi_score = 25
+            buy_rsi_score  = 25;  sell_rsi_score = 20
         elif 60 < rsi <= 70:
-            buy_rsi_score = 20
+            buy_rsi_score  = 20;  sell_rsi_score = 25
         elif rsi < 30:
-            buy_rsi_score = 15
+            buy_rsi_score  = 15;  sell_rsi_score = 0   # 売られすぎ除外
         else:  # 70超
-            buy_rsi_score = 0
-
-        # RRスコア（30点）：rr_buy から計算
-        buy_rr_score = min(rr_buy / 3 * 30, 30) if rr_buy > 0 else 0
-
-        buy_score = buy_trend_score + buy_rsi_score + buy_rr_score
-
-        # ----------------------------------------
-        # 改善①：売りスコア（最大100点）
-        # ----------------------------------------
-        # トレンドスコア（35点）：下落トレンドで満点
-        sell_trend_score = 35 if not trend_up else 0
-
-        # RSIスコア（35点）：40〜60満点、30未満は0点（売られすぎ除外）
-        if 40 <= rsi <= 60:
-            sell_rsi_score = 35
-        elif 60 < rsi <= 70:
-            sell_rsi_score = 25
-        elif 30 <= rsi < 40:
-            sell_rsi_score = 20
-        elif rsi > 70:
-            sell_rsi_score = 15
-        else:  # 30未満
-            sell_rsi_score = 0
-
-        # RRスコア（30点）：rr_sell から計算
-        sell_rr_score = min(rr_sell / 3 * 30, 30) if rr_sell > 0 else 0
-
-        sell_score = sell_trend_score + sell_rsi_score + sell_rr_score
-
-        # 改善①：買い/売りの高い方を採用
-        if buy_score >= sell_score:
-            swing_direction = "買い"
-            swing_score     = buy_score
-            swing_sup       = sup_buy   # 損切り
-            swing_res       = res_buy   # 利確
-            swing_rr        = rr_buy
-            swing_rr_valid  = (sup_buy is not None and res_buy is not None and rr_buy > 0)
-        else:
-            swing_direction = "売り"
-            swing_score     = sell_score
-            swing_sup       = res_sell  # 売りの損切り（上）
-            swing_res       = sup_sell  # 売りの利確（下）
-            swing_rr        = rr_sell
-            swing_rr_valid  = (res_sell is not None and sup_sell is not None and rr_sell > 0)
+            buy_rsi_score  = 0;   sell_rsi_score = 15
 
         return {
             'code':           code,
             'name':           name,
             'price':          curr,
-            'change_pct':     change_pct,      # 改善⑤
+            'change_pct':     change_pct,
             'rsi':            rsi,
             'trend':          trend,
             'trend_up':       trend_up,
-            # デイトレ用
-            'sup_buy':        sup_buy,
-            'res_buy':        res_buy,
+            'ma_divergence':  ma_divergence,   # ⑦相対評価用
+            # デイトレ
+            'sup_buy':        sup_buy_p,
+            'res_buy':        res_buy_p,
             'rr_buy':         rr_buy,
-            'dt_rr_valid':    dt_rr_valid,     # 改善②
-            'dt_direction':   dt_direction,    # 改善④
+            'dt_rr_valid':    dt_rr_valid,
+            'dt_direction':   dt_direction,
             'dt_dir_color':   dt_dir_color,
             'daytrade_score': round(daytrade_score, 1),
-            # スイング用
-            'swing_direction': swing_direction, # 改善①
-            'swing_score':     round(swing_score, 1),
-            'swing_sup':       swing_sup,
-            'swing_res':       swing_res,
-            'swing_rr':        swing_rr,
-            'swing_rr_valid':  swing_rr_valid,  # 改善②
-            # 買い/売り両スコア（参考）
-            'buy_score':      round(buy_score, 1),
-            'sell_score':     round(sell_score, 1),
+            # スイング raw（相対評価前）
+            'rr_buy_raw':     rr_buy,           # ⑦相対評価用
+            'rr_sell_raw':    rr_sell,           # ⑦相対評価用
+            'buy_rsi_score':  buy_rsi_score,
+            'sell_rsi_score': sell_rsi_score,
+            # 節目価格
+            'sup_buy_price':  sup_buy_p,
+            'res_buy_price':  res_buy_p,
+            'sup_sell_price': sup_sell_p,
+            'res_sell_price': res_sell_p,
         }
     except Exception as e:
         print(f"  エラー {code}: {e}")
         return None
 
-print("STEP 2：全銘柄スコア計算中...")
+print("STEP 2：全銘柄rawデータ収集中...")
 all_results = []
 for code, name in top50_stocks:
-    r = calc_all_scores(code, name)
+    r = calc_raw(code, name)
     if r:
         all_results.append(r)
     time.sleep(0.3)
 
-print(f"スコア計算完了：{len(all_results)}銘柄")
+print(f"rawデータ収集完了：{len(all_results)}銘柄")
+
+# ========================================
+# 改善⑦：相対評価でスイングスコアを確定
+# ========================================
+from scipy import stats as _stats
+
+def rank_score(values, higher_is_better=True, max_pts=35):
+    """順位ベースで0〜max_ptsの点数リストを返す（同値は平均順位）"""
+    n = len(values)
+    if n <= 1:
+        return [max_pts] * n
+    ranks = _stats.rankdata(values)          # 昇順1〜n
+    if higher_is_better:
+        return [(r - 1) / (n - 1) * max_pts for r in ranks]
+    else:
+        return [(n - r) / (n - 1) * max_pts for r in ranks]
+
+ma_divs   = [r['ma_divergence'] for r in all_results]
+rr_buys   = [r['rr_buy_raw']    for r in all_results]
+rr_sells  = [r['rr_sell_raw']   for r in all_results]
+
+# 買いトレンド：MA乖離率が大きい（上昇強い）ほど高得点
+buy_trend_sc  = rank_score(ma_divs,  higher_is_better=True,  max_pts=35)
+# 売りトレンド：MA乖離率が小さい（下落強い）ほど高得点
+sell_trend_sc = rank_score(ma_divs,  higher_is_better=False, max_pts=35)
+# RR比率：大きいほど高得点（買い・売り独立）
+buy_rr_sc     = rank_score(rr_buys,  higher_is_better=True,  max_pts=30)
+sell_rr_sc    = rank_score(rr_sells, higher_is_better=True,  max_pts=30)
+
+for i, r in enumerate(all_results):
+    buy_score  = buy_trend_sc[i]  + r['buy_rsi_score']  + buy_rr_sc[i]
+    sell_score = sell_trend_sc[i] + r['sell_rsi_score'] + sell_rr_sc[i]
+
+    buy_rr_valid  = (r['sup_buy_price']  is not None and r['res_buy_price']  is not None and r['rr_buy_raw']  > 0)
+    sell_rr_valid = (r['res_sell_price'] is not None and r['sup_sell_price'] is not None and r['rr_sell_raw'] > 0)
+
+    if buy_score >= sell_score:
+        r['swing_direction'] = "買い"
+        r['swing_score']     = round(buy_score, 1)
+        r['swing_sup']       = r['sup_buy_price']
+        r['swing_res']       = r['res_buy_price']
+        r['swing_rr']        = r['rr_buy_raw']
+        r['swing_rr_valid']  = buy_rr_valid
+    else:
+        r['swing_direction'] = "売り"
+        r['swing_score']     = round(sell_score, 1)
+        r['swing_sup']       = r['res_sell_price']  # 売り損切り（上）
+        r['swing_res']       = r['sup_sell_price']  # 売り利確（下）
+        r['swing_rr']        = r['rr_sell_raw']
+        r['swing_rr_valid']  = sell_rr_valid
+
+print("スイングスコア相対評価完了")
 
 # 改善③：決算日フラグ取得
 print("STEP 3：決算日フラグ取得中...")
@@ -382,15 +349,26 @@ for code, name in top50_stocks:
 # ========================================
 # 改善②：RR算出不可を除外してTOP10選出
 # ========================================
-# デイトレ：dt_rr_valid=True のみ対象
-dt_valid = [r for r in all_results if r['dt_rr_valid']]
-dt_top10 = sorted(dt_valid, key=lambda x: x['daytrade_score'], reverse=True)[:10]
+dt_valid    = [r for r in all_results if r['dt_rr_valid']]
+dt_top10    = sorted(dt_valid,    key=lambda x: x['daytrade_score'], reverse=True)[:10]
 
-# スイング：swing_rr_valid=True のみ対象
 swing_valid = [r for r in all_results if r['swing_rr_valid']]
-swing_top10 = sorted(swing_valid, key=lambda x: x['swing_score'], reverse=True)[:10]
+swing_top10 = sorted(swing_valid, key=lambda x: x['swing_score'],    reverse=True)[:10]
 
 print(f"デイトレ対象：{len(dt_valid)}銘柄 / スイング対象：{len(swing_valid)}銘柄")
+
+# ========================================
+# 改善⑧：デイトレ/スイング目線相違フラグ
+# ========================================
+dt_dir_map    = {r['code']: ("買い" if "買い" in r['dt_direction'] else "売り") for r in dt_top10}
+swing_dir_map = {r['code']: r['swing_direction'] for r in swing_top10}
+
+MISMATCH_CODES = {
+    code for code in set(dt_dir_map) & set(swing_dir_map)
+    if dt_dir_map[code] != swing_dir_map[code]
+}
+if MISMATCH_CODES:
+    print(f"目線相違銘柄: {MISMATCH_CODES}")
 
 # ========================================
 # yFinanceで相場データ取得
@@ -458,8 +436,10 @@ for name, val, change, pct, is_rate in items:
 # HTML組み立て
 # ========================================
 
-def build_daytrade_table(results, earnings_flags):
-    """改善②④⑤対応のデイトレ表"""
+def build_daytrade_table(results, earnings_flags, mismatch_codes=None):
+    """改善②④⑤⑧対応のデイトレ表"""
+    if mismatch_codes is None:
+        mismatch_codes = set()
     thead = (
         "<tr style='background:#f5f5f5;'>"
         "<th style='padding:6px 8px;text-align:left;font-size:11px;'>銘柄</th>"
@@ -496,10 +476,17 @@ def build_daytrade_table(results, earnings_flags):
         rsi_color   = "#d32f2f" if d['rsi'] < 30 else "#1565c0" if d['rsi'] > 70 else "#333"
         dir_color   = d['dt_dir_color']
 
+        # 改善⑧：目線相違フラグ
+        mismatch_html = (
+            " <span style='color:#6a1b9a;font-size:10px;font-weight:bold;'>"
+            + "\u26a0" + "目線相違"
+            + "</span>"
+        ) if d['code'] in mismatch_codes else ""
+
         tbody += (
             "<tr>"
             + "<td style='padding:6px 8px;border-bottom:1px solid #eee;font-weight:bold;font-size:11px;'>"
-            + str(i+1) + ". " + d['name'] + "(" + d['code'] + ")" + earnings_html
+            + str(i+1) + ". " + d['name'] + "(" + d['code'] + ")" + earnings_html + mismatch_html
             + "</td>"
             + "<td style='padding:6px 8px;border-bottom:1px solid #eee;text-align:right;font-size:11px;'>"
             + f"{d['price']:,.0f}" + "円</td>"
@@ -535,8 +522,10 @@ def build_daytrade_table(results, earnings_flags):
     )
 
 
-def build_swing_table(results, earnings_flags):
-    """改善①②③⑤対応のスイング表"""
+def build_swing_table(results, earnings_flags, mismatch_codes=None):
+    """改善①②③⑤⑧対応のスイング表"""
+    if mismatch_codes is None:
+        mismatch_codes = set()
     thead = (
         "<tr style='background:#f5f5f5;'>"
         "<th style='padding:6px 8px;text-align:left;font-size:11px;'>銘柄</th>"
@@ -585,10 +574,17 @@ def build_swing_table(results, earnings_flags):
         rsi_color   = "#d32f2f" if d['rsi'] < 30 else "#1565c0" if d['rsi'] > 70 else "#333"
         trend_color = "#d32f2f" if d['trend'] == '上昇' else "#1565c0"
 
+        # 改善⑧：目線相違フラグ
+        mismatch_html = (
+            " <span style='color:#6a1b9a;font-size:10px;font-weight:bold;'>"
+            + "\u26a0" + "目線相違"
+            + "</span>"
+        ) if d['code'] in mismatch_codes else ""
+
         tbody += (
             "<tr>"
             + "<td style='padding:6px 8px;border-bottom:1px solid #eee;font-weight:bold;font-size:11px;'>"
-            + str(i+1) + ". " + d['name'] + "(" + d['code'] + ")" + earnings_html
+            + str(i+1) + ". " + d['name'] + "(" + d['code'] + ")" + earnings_html + mismatch_html
             + "</td>"
             + "<td style='padding:6px 8px;border-bottom:1px solid #eee;text-align:right;font-size:11px;'>"
             + f"{d['price']:,.0f}" + "円</td>"
@@ -626,8 +622,8 @@ def build_swing_table(results, earnings_flags):
     )
 
 
-dt_section    = build_daytrade_table(dt_top10,    earnings_flags)
-swing_section = build_swing_table(swing_top10, earnings_flags)
+dt_section    = build_daytrade_table(dt_top10,    earnings_flags, MISMATCH_CODES)
+swing_section = build_swing_table(swing_top10, earnings_flags, MISMATCH_CODES)
 
 html = (
     "<html><body style='font-family:sans-serif;background:#f5f5f5;padding:20px;'>"
