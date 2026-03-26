@@ -302,23 +302,7 @@ for i, d in enumerate(detail_results):
 
 
 dt_section = f"""
-<div style='margin-top:16px;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.1);'>
-<div style='background:#1b5e20;color:#fff;padding:12px 20px;'>
-<h2 style='margin:0;font-size:16px;'>今日のデイトレ推奨銘柄</h2>
-<p style='margin:4px 0 0;font-size:11px;opacity:0.8;'>前日終値ベースです</p>
-</div>
-<table style='width:100%;border-collapse:collapse;font-size:12px;'>
-<thead><tr style='background:#e8f5e9;'>
-<th style='padding:6px 12px;text-align:left;'>銘柄</th>
-<th style='padding:6px 12px;text-align:right;'>株価</th>
-<th style='padding:6px 12px;text-align:right;'>RSI</th>
-<th style='padding:6px 12px;text-align:right;'>トレンド</th>
-<th style='padding:6px 12px;text-align:right;'>損切り</th>
-<th style='padding:6px 12px;text-align:right;'>利確</th>
-<th style='padding:6px 12px;text-align:right;'>RR</th>
-</tr></thead>
-<tbody>{dt_rows}</tbody></table>
-</div>"""
+dt_section = "<div style=\"margin-top:16px;padding:16px;background:#e8f5e9;\"><h2>今日のデイトレ推奨銘柄</h2><p>前日終値ベース</p>" + dt_rows + "</div>"
 </div>{dt_section}</body></html>"""
 
 msg = MIMEMultipart('alternative')
