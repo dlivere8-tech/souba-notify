@@ -273,22 +273,33 @@ html = f"""<html><body style='font-family:sans-serif;background:#f5f5f5;padding:
 </tr></thead>
 <tbody>{rows}</tbody></table>
 <p style='padding:12px 16px;font-size:11px;color:#999;margin:0;'>投資判断はご自身の責任でお願いします</p>
+
 dt_rows = ""
 for i, d in enumerate(detail_results):
-    sup_str = f"¥{d['sup']:,.0f}" if d['sup'] else "-"
-    res_str = f"¥{d['res']:,.0f}" if d['res'] else "-"
+    sup_str = f"{d['sup']:,.0f}円" if d['sup'] else "-"
+    res_str = f"{d['res']:,.0f}円" if d['res'] else "-"
     rr_str  = f"{d['rr']:.1f}" if d['rr'] > 0 else "-"
-    rsi_color = "#d32f2f" if d['rsi'] < 30 else "#1565c0" if d['rsi'] > 70 else "#333"
+    rsi_color   = "#d32f2f" if d['rsi'] < 30 else "#1565c0" if d['rsi'] > 70 else "#333"
     trend_color = "#d32f2f" if d['trend'] == '上昇' else "#1565c0"
-    dt_rows += f"""<tr>
-        <td style='padding:6px 12px;border-bottom:1px solid #eee;font-weight:bold;'>{i+1}. {d['name']}({d['code']})</td>
-        <td style='padding:6px 12px;border-bottom:1px solid #eee;text-align:right;'>¥{d['price']:,.0f}</td>
-        <td style='padding:6px 12px;border-bottom:1px solid #eee;text-align:right;color:{rsi_color};'>{d['rsi']:.1f}</td>
-        <td style='padding:6px 12px;border-bottom:1px solid #eee;text-align:right;color:{trend_color};'>{d['trend']}</td>
-        <td style='padding:6px 12px;border-bottom:1px solid #eee;text-align:right;'>{sup_str}</td>
-        <td style='padding:6px 12px;border-bottom:1px solid #eee;text-align:right;'>{res_str}</td>
-        <td style='padding:6px 12px;border-bottom:1px solid #eee;text-align:right;font-weight:bold;'>{rr_str}</td>
-    </tr>"""
+    dt_rows += (
+        "<tr>"
+        "<td style='padding:6px 12px;border-bottom:1px solid #eee;font-weight:bold;'>"
+        f"{i+1}. {d['name']}({d['code']})</td>"
+        "<td style='padding:6px 12px;border-bottom:1px solid #eee;text-align:right;'>"
+        f"{d['price']:,.0f}円</td>"
+        f"<td style='padding:6px 12px;border-bottom:1px solid #eee;text-align:right;color:{rsi_color};'>"
+        f"{d['rsi']:.1f}</td>"
+        f"<td style='padding:6px 12px;border-bottom:1px solid #eee;text-align:right;color:{trend_color};'>"
+        f"{d['trend']}</td>"
+        "<td style='padding:6px 12px;border-bottom:1px solid #eee;text-align:right;'>"
+        f"{sup_str}</td>"
+        "<td style='padding:6px 12px;border-bottom:1px solid #eee;text-align:right;'>"
+        f"{res_str}</td>"
+        "<td style='padding:6px 12px;border-bottom:1px solid #eee;text-align:right;font-weight:bold;'>"
+        f"{rr_str}</td>"
+        "</tr>"
+    )
+
 
 dt_section = f"""
 <div style='margin-top:16px;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.1);'>
