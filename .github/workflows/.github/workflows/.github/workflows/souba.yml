@@ -2,7 +2,7 @@ name: 毎朝相場通知
 
 on:
   schedule:
-    - cron: '0 23 * * 0-4'  # 日本時間 毎朝8時（UTC 23時、月〜金）
+    - cron: '0 22 * * 0-4'  # 日本時間 毎朝8時（UTC 22時、月〜金）
   workflow_dispatch:          # 手動実行も可能
 
 jobs:
