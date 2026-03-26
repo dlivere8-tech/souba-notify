@@ -273,6 +273,7 @@ html = f"""<html><body style='font-family:sans-serif;background:#f5f5f5;padding:
 </tr></thead>
 <tbody>{rows}</tbody></table>
 <p style='padding:12px 16px;font-size:11px;color:#999;margin:0;'>投資判断はご自身の責任でお願いします</p>
+""" # ← ここに閉じるためのトリプルクォートを追加
 
 dt_rows = ""
 for i, d in enumerate(detail_results):
@@ -301,8 +302,12 @@ for i, d in enumerate(detail_results):
     )
 
 dt_section = "<div style=\"margin-top:16px;padding:16px;background:#e8f5e9;\"><h2>今日のデイトレ推奨銘柄</h2><p>前日終値ベース</p>" + dt_rows + "</div>"
-dt_section = f"""
-</div>{dt_section}</body></html>"""
+
+# dt_sectionと全体の閉じタグをhtmlに結合する
+html += f"""
+{dt_section}
+</div>
+</body></html>"""
 
 msg = MIMEMultipart('alternative')
 msg['From']    = GMAIL_ADDRESS
@@ -316,9 +321,6 @@ try:
         smtp.starttls()
         smtp.login(GMAIL_ADDRESS, GMAIL_APP_PASS)
         smtp.sendmail(GMAIL_ADDRESS, SEND_TO, msg.as_bytes())
-    print("メール送信完了！")
-except Exception as e:
-    print(f"メール送信失敗: {e}")
     print("メール送信完了！")
 except Exception as e:
     print(f"メール送信失敗: {e}")
