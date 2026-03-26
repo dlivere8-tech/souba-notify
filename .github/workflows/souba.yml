@@ -2,22 +2,25 @@ name: 毎朝相場通知
 
 on:
   schedule:
-    - cron: '0 22 * * 0-4'  # 日本時間 毎朝8時（UTC 23時、月〜金）
+    - cron: '0 21 * * 0-4'  # 日本時間 毎朝7時（UTC 23時、月〜金）
   workflow_dispatch:          # 手動実行も可能
 
 jobs:
   notify:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      # Warning対策: v3 → v4 に更新
+      - uses: actions/checkout@v4
 
       - name: Python セットアップ
-        uses: actions/setup-python@v4
+        # Warning対策: v4 → v5 に更新
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
       - name: ライブラリインストール
-        run: pip install yfinance pandas requests beautifulsoup4 pytz gspread google-auth
+        # エラー対策: 行の最後に pandas-ta を追加
+        run: pip install yfinance pandas requests beautifulsoup4 pytz gspread google-auth pandas-ta
 
       - name: 相場通知実行
         env:
