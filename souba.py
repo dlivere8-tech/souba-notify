@@ -300,9 +300,8 @@ for i, d in enumerate(detail_results):
         "</tr>"
     )
 
-
-dt_section = f"""
 dt_section = "<div style=\"margin-top:16px;padding:16px;background:#e8f5e9;\"><h2>今日のデイトレ推奨銘柄</h2><p>前日終値ベース</p>" + dt_rows + "</div>"
+dt_section = f"""
 </div>{dt_section}</body></html>"""
 
 msg = MIMEMultipart('alternative')
