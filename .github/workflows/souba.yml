@@ -16,7 +16,7 @@ jobs:
         # Warning対策: v4 → v5 に更新
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.12'
 
       - name: ライブラリインストール
         # エラー対策: 行の最後に pandas-ta を追加
