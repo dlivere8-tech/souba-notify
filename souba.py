@@ -305,7 +305,7 @@ dt_section = f"""
 <div style='margin-top:16px;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.1);'>
 <div style='background:#1b5e20;color:#fff;padding:12px 20px;'>
 <h2 style='margin:0;font-size:16px;'>今日のデイトレ推奨銘柄</h2>
-<p style='margin:4px 0 0;font-size:11px;opacity:0.8;'>前日終値ベース・投資判断はご自身で</p>
+<p style='margin:4px 0 0;font-size:11px;opacity:0.8;'>前日終値ベース･投資判断はご自身で</p>
 </div>
 <table style='width:100%;border-collapse:collapse;font-size:12px;'>
 <thead><tr style='background:#e8f5e9;'>
