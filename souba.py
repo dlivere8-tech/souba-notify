@@ -149,7 +149,7 @@ def get_japanese_name(code):
             name = re.sub(r'の株価.*', '', name)
             name = re.sub(r'\(株\)|（株）', '', name)
             name = name.strip()
-            return name[:10]  # スマホ幅節約のため10文字でカット
+            return name[:12]  # スペースが増えたので12文字まで許可
     except:
         pass
     
@@ -157,7 +157,7 @@ def get_japanese_name(code):
         info = yf.Ticker(f"{code}.T").info
         for key in ('displayName', 'longName', 'shortName'):
             val = info.get(key)
-            if val: return val[:10]
+            if val: return val[:12]
     except:
         pass
     return code
@@ -214,6 +214,8 @@ def calc_raw(code, name):
         ma25 = latest['MA25']
         ma75 = latest['MA75']
         ma_divergence = (ma25 - ma75) / ma75 * 100 if not pd.isna(ma25) and not pd.isna(ma75) and ma75 != 0 else 0.0
+        trend_up = ma_divergence > 0
+        trend    = '上昇' if trend_up else '下落'
 
         sup_buy_p = res_buy_p = sup_sell_p = res_sell_p = None
         rr_buy = rr_sell = 0.0
@@ -283,6 +285,7 @@ def calc_raw(code, name):
             'price':          curr,
             'change_pct':     change_pct,
             'rsi':            rsi,
+            'trend':          trend,
             'ma_divergence':  ma_divergence,
             'dt_direction':   dt_direction,
             'dt_sup':         dt_sup,
@@ -446,65 +449,77 @@ for label, val, change, pct, is_rate in items:
     )
 
 # ========================================
-# HTML組み立て (スマホ最適化版)
+# HTML組み立て (2段組み・5列スマートレイアウト)
 # ========================================
 def build_daytrade_table(results, earnings_flags, mismatch_codes=None):
     if mismatch_codes is None: mismatch_codes = set()
-    # white-space:nowrap で縦潰れを完全防止
+    # 銘柄列に幅35%を指定し、残りの列はnowrapで最小幅に
     thead = (
         "<tr style='background:#f5f5f5;'>"
-        "<th style='padding:6px 4px;text-align:left;font-size:11px;white-space:nowrap;'>銘柄</th>"
+        "<th style='padding:6px 4px;text-align:left;font-size:11px;width:35%;'>銘柄</th>"
         "<th style='padding:6px 4px;text-align:right;font-size:11px;white-space:nowrap;'>株価</th>"
-        "<th style='padding:6px 4px;text-align:right;font-size:11px;white-space:nowrap;'>前日比</th>"
-        "<th style='padding:6px 4px;text-align:right;font-size:11px;white-space:nowrap;'>方向</th>"
-        "<th style='padding:6px 4px;text-align:right;font-size:11px;white-space:nowrap;'>損切</th>"
-        "<th style='padding:6px 4px;text-align:right;font-size:11px;white-space:nowrap;'>利確</th>"
-        "<th style='padding:6px 4px;text-align:right;font-size:11px;white-space:nowrap;'>RR</th>"
-        "<th style='padding:6px 4px;text-align:right;font-size:11px;white-space:nowrap;'>RSI</th>"
+        "<th style='padding:6px 4px;text-align:right;font-size:11px;white-space:nowrap;'>状態</th>"
+        "<th style='padding:6px 4px;text-align:right;font-size:11px;white-space:nowrap;'>目安</th>"
         "<th style='padding:6px 4px;text-align:right;font-size:11px;white-space:nowrap;'>点数</th>"
         "</tr>"
     )
     tbody = ""
     for i, d in enumerate(results):
         earnings = earnings_flags.get(d['code'], "")
-        earnings_html = (" <span style='color:#e65100;font-size:10px;font-weight:bold;'>\u26a0" + earnings + "</span>") if earnings else ""
-        mismatch_html = (" <span style='color:#6a1b9a;font-size:10px;font-weight:bold;'>\u26a0相違</span>") if d['code'] in mismatch_codes else ""
+        earnings_html = ("<br><span style='color:#e65100;font-size:10px;font-weight:bold;'>\u26a0" + earnings + "</span>") if earnings else ""
+        mismatch_html = ("<br><span style='color:#6a1b9a;font-size:10px;font-weight:bold;'>\u26a0目線相違</span>") if d['code'] in mismatch_codes else ""
 
+        # 株価 / 前日比
+        price_str = f"{d['price']:,.0f}"
         pct_val = d['change_pct']
         pct_str = f"{pct_val:+.2f}%"
         pct_color = "#d32f2f" if pct_val >= 0 else "#1565c0"
 
+        # 状態 (方向 / RSI)
         direction = d['dt_direction']
         if direction == "買い":
-            dir_color = "#d32f2f"
-            dir_label = "↑買"
+            dir_color = "#d32f2f"; dir_label = "↑買い"
         else:
-            dir_color = "#1565c0"
-            dir_label = "↓売"
+            dir_color = "#1565c0"; dir_label = "↓売り"
+        rsi_str = f"RSI:{d['rsi']:.1f}"
 
-        sup_str = f"{d['dt_sup']:,.0f}" if d['dt_sup'] else "-"
-        res_str = f"{d['dt_res']:,.0f}" if d['dt_res'] else "-"
-        rr_str  = f"{d['dt_rr']:.1f}"  if d['dt_rr'] > 0 else "-"
-        rsi_color = "#d32f2f" if d['rsi'] < 30 else "#1565c0" if d['rsi'] > 70 else "#333"
+        # 目安 (利確 / 損切)
+        res_str = f"利: {d['dt_res']:,.0f}" if d['dt_res'] else "利: -"
+        sup_str = f"損: {d['dt_sup']:,.0f}" if d['dt_sup'] else "損: -"
+
+        # 点数 / RR
+        score_str = str(d['daytrade_score'])
+        rr_str = f"RR:{d['dt_rr']:.1f}" if d['dt_rr'] > 0 else "RR:-"
 
         tbody += (
             "<tr>"
-            + f"<td style='padding:6px 4px;border-bottom:1px solid #eee;font-weight:bold;font-size:11px;'>{i+1}. {d['name']}<br><span style='font-weight:normal;color:#666;'>({d['code']})</span>{earnings_html}{mismatch_html}</td>"
-            + f"<td style='padding:6px 4px;border-bottom:1px solid #eee;text-align:right;font-size:11px;white-space:nowrap;'>{d['price']:,.0f}</td>"
-            + f"<td style='padding:6px 4px;border-bottom:1px solid #eee;text-align:right;font-size:11px;color:{pct_color};font-weight:bold;white-space:nowrap;'>{pct_str}</td>"
-            + f"<td style='padding:6px 4px;border-bottom:1px solid #eee;text-align:right;font-size:11px;color:{dir_color};font-weight:bold;white-space:nowrap;'>{dir_label}</td>"
-            + f"<td style='padding:6px 4px;border-bottom:1px solid #eee;text-align:right;font-size:11px;white-space:nowrap;'>{sup_str}</td>"
-            + f"<td style='padding:6px 4px;border-bottom:1px solid #eee;text-align:right;font-size:11px;white-space:nowrap;'>{res_str}</td>"
-            + f"<td style='padding:6px 4px;border-bottom:1px solid #eee;text-align:right;font-weight:bold;font-size:11px;white-space:nowrap;'>{rr_str}</td>"
-            + f"<td style='padding:6px 4px;border-bottom:1px solid #eee;text-align:right;color:{rsi_color};font-size:11px;white-space:nowrap;'>{d['rsi']:.1f}</td>"
-            + f"<td style='padding:6px 4px;border-bottom:1px solid #eee;text-align:right;font-weight:bold;font-size:12px;color:#1b5e20;white-space:nowrap;'>{d['daytrade_score']}</td>"
+            # 銘柄
+            + f"<td style='padding:6px 4px;border-bottom:1px solid #eee;font-size:12px;font-weight:bold;'>"
+            + f"{i+1}. {d['name']}<br><span style='font-size:10px;font-weight:normal;color:#666;'>({d['code']})</span>"
+            + f"{earnings_html}{mismatch_html}</td>"
+            # 株価
+            + f"<td style='padding:6px 4px;border-bottom:1px solid #eee;text-align:right;white-space:nowrap;'>"
+            + f"<div style='font-size:12px;font-weight:bold;'>{price_str}</div>"
+            + f"<div style='font-size:10px;color:{pct_color};font-weight:bold;'>{pct_str}</div></td>"
+            # 状態
+            + f"<td style='padding:6px 4px;border-bottom:1px solid #eee;text-align:right;white-space:nowrap;'>"
+            + f"<div style='font-size:12px;font-weight:bold;color:{dir_color};'>{dir_label}</div>"
+            + f"<div style='font-size:10px;color:#666;'>{rsi_str}</div></td>"
+            # 目安
+            + f"<td style='padding:6px 4px;border-bottom:1px solid #eee;text-align:right;white-space:nowrap;'>"
+            + f"<div style='font-size:11px;font-weight:bold;color:#333;'>{res_str}</div>"
+            + f"<div style='font-size:10px;color:#666;'>{sup_str}</div></td>"
+            # 点数
+            + f"<td style='padding:6px 4px;border-bottom:1px solid #eee;text-align:right;white-space:nowrap;'>"
+            + f"<div style='font-size:12px;font-weight:bold;color:#1b5e20;'>{score_str}</div>"
+            + f"<div style='font-size:10px;color:#666;'>{rr_str}</div></td>"
             + "</tr>"
         )
     return (
         "<div style='margin-top:16px;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.1);'>"
         "<div style='background:#1b5e20;color:#fff;padding:12px 16px;'>"
-        "<h2 style='margin:0;font-size:15px;'>今日のデイトレ推奨銘柄</h2>"
-        "<p style='margin:4px 0 0;font-size:11px;opacity:0.8;'>前日終値ベース</p>"
+        "<h2 style='margin:0;font-size:15px;'>今日のデイトレ推奨</h2>"
+        "<p style='margin:4px 0 0;font-size:11px;opacity:0.8;'>前日終値ベース・RR算出可能銘柄</p>"
         "</div><div style='overflow-x:auto;'><table style='width:100%;border-collapse:collapse;'>"
         "<thead>" + thead + "</thead><tbody>" + tbody + "</tbody></table></div></div>"
     )
@@ -513,55 +528,71 @@ def build_swing_table(results, earnings_flags, mismatch_codes=None):
     if mismatch_codes is None: mismatch_codes = set()
     thead = (
         "<tr style='background:#f5f5f5;'>"
-        "<th style='padding:6px 4px;text-align:left;font-size:11px;white-space:nowrap;'>銘柄</th>"
+        "<th style='padding:6px 4px;text-align:left;font-size:11px;width:35%;'>銘柄</th>"
         "<th style='padding:6px 4px;text-align:right;font-size:11px;white-space:nowrap;'>株価</th>"
-        "<th style='padding:6px 4px;text-align:right;font-size:11px;white-space:nowrap;'>前日比</th>"
-        "<th style='padding:6px 4px;text-align:right;font-size:11px;white-space:nowrap;'>方向</th>"
-        "<th style='padding:6px 4px;text-align:right;font-size:11px;white-space:nowrap;'>損切</th>"
-        "<th style='padding:6px 4px;text-align:right;font-size:11px;white-space:nowrap;'>利確</th>"
-        "<th style='padding:6px 4px;text-align:right;font-size:11px;white-space:nowrap;'>RR</th>"
-        "<th style='padding:6px 4px;text-align:right;font-size:11px;white-space:nowrap;'>RSI</th>"
+        "<th style='padding:6px 4px;text-align:right;font-size:11px;white-space:nowrap;'>状態</th>"
+        "<th style='padding:6px 4px;text-align:right;font-size:11px;white-space:nowrap;'>目安</th>"
         "<th style='padding:6px 4px;text-align:right;font-size:11px;white-space:nowrap;'>点数</th>"
         "</tr>"
     )
     tbody = ""
     for i, d in enumerate(results):
         earnings = earnings_flags.get(d['code'], "")
-        earnings_html = (" <span style='color:#e65100;font-size:10px;font-weight:bold;'>\u26a0" + earnings + "</span>") if earnings else ""
-        mismatch_html = (" <span style='color:#6a1b9a;font-size:10px;font-weight:bold;'>\u26a0相違</span>") if d['code'] in mismatch_codes else ""
+        earnings_html = ("<br><span style='color:#e65100;font-size:10px;font-weight:bold;'>\u26a0" + earnings + "</span>") if earnings else ""
+        mismatch_html = ("<br><span style='color:#6a1b9a;font-size:10px;font-weight:bold;'>\u26a0目線相違</span>") if d['code'] in mismatch_codes else ""
 
+        # 株価 / 前日比
+        price_str = f"{d['price']:,.0f}"
         pct_val = d['change_pct']
         pct_str = f"{pct_val:+.2f}%"
         pct_color = "#d32f2f" if pct_val >= 0 else "#1565c0"
 
+        # 状態 (方向 / トレンド・RSI)
         direction = d['swing_direction']
         if direction == "買い":
-            dir_color = "#d32f2f"; dir_label = "↑買"; score_color = "#b71c1c"
+            dir_color = "#d32f2f"; dir_label = "↑買い"; score_color = "#b71c1c"
         else:
-            dir_color = "#1565c0"; dir_label = "↓売"; score_color = "#0d47a1"
+            dir_color = "#1565c0"; dir_label = "↓売り"; score_color = "#0d47a1"
+            
+        trend_label = "上" if d['trend'] == '上昇' else "下"
+        status_str = f"{trend_label} / RSI:{d['rsi']:.1f}"
 
-        sup_str = f"{d['swing_sup']:,.0f}" if d['swing_sup'] else "-"
-        res_str = f"{d['swing_res']:,.0f}" if d['swing_res'] else "-"
-        rr_str  = f"{d['swing_rr']:.1f}"  if d['swing_rr'] > 0 else "-"
-        rsi_color = "#d32f2f" if d['rsi'] < 30 else "#1565c0" if d['rsi'] > 70 else "#333"
+        # 目安 (利確 / 損切)
+        res_str = f"利: {d['swing_res']:,.0f}" if d['swing_res'] else "利: -"
+        sup_str = f"損: {d['swing_sup']:,.0f}" if d['swing_sup'] else "損: -"
+
+        # 点数 / RR
+        score_str = str(d['swing_score'])
+        rr_str = f"RR:{d['swing_rr']:.1f}" if d['swing_rr'] > 0 else "RR:-"
 
         tbody += (
             "<tr>"
-            + f"<td style='padding:6px 4px;border-bottom:1px solid #eee;font-weight:bold;font-size:11px;'>{i+1}. {d['name']}<br><span style='font-weight:normal;color:#666;'>({d['code']})</span>{earnings_html}{mismatch_html}</td>"
-            + f"<td style='padding:6px 4px;border-bottom:1px solid #eee;text-align:right;font-size:11px;white-space:nowrap;'>{d['price']:,.0f}</td>"
-            + f"<td style='padding:6px 4px;border-bottom:1px solid #eee;text-align:right;font-size:11px;color:{pct_color};font-weight:bold;white-space:nowrap;'>{pct_str}</td>"
-            + f"<td style='padding:6px 4px;border-bottom:1px solid #eee;text-align:right;font-size:11px;color:{dir_color};font-weight:bold;white-space:nowrap;'>{dir_label}</td>"
-            + f"<td style='padding:6px 4px;border-bottom:1px solid #eee;text-align:right;font-size:11px;white-space:nowrap;'>{sup_str}</td>"
-            + f"<td style='padding:6px 4px;border-bottom:1px solid #eee;text-align:right;font-size:11px;white-space:nowrap;'>{res_str}</td>"
-            + f"<td style='padding:6px 4px;border-bottom:1px solid #eee;text-align:right;font-weight:bold;font-size:11px;white-space:nowrap;'>{rr_str}</td>"
-            + f"<td style='padding:6px 4px;border-bottom:1px solid #eee;text-align:right;color:{rsi_color};font-size:11px;white-space:nowrap;'>{d['rsi']:.1f}</td>"
-            + f"<td style='padding:6px 4px;border-bottom:1px solid #eee;text-align:right;font-weight:bold;font-size:12px;color:{score_color};white-space:nowrap;'>{d['swing_score']}</td>"
+            # 銘柄
+            + f"<td style='padding:6px 4px;border-bottom:1px solid #eee;font-size:12px;font-weight:bold;'>"
+            + f"{i+1}. {d['name']}<br><span style='font-size:10px;font-weight:normal;color:#666;'>({d['code']})</span>"
+            + f"{earnings_html}{mismatch_html}</td>"
+            # 株価
+            + f"<td style='padding:6px 4px;border-bottom:1px solid #eee;text-align:right;white-space:nowrap;'>"
+            + f"<div style='font-size:12px;font-weight:bold;'>{price_str}</div>"
+            + f"<div style='font-size:10px;color:{pct_color};font-weight:bold;'>{pct_str}</div></td>"
+            # 状態
+            + f"<td style='padding:6px 4px;border-bottom:1px solid #eee;text-align:right;white-space:nowrap;'>"
+            + f"<div style='font-size:12px;font-weight:bold;color:{dir_color};'>{dir_label}</div>"
+            + f"<div style='font-size:10px;color:#666;'>{status_str}</div></td>"
+            # 目安
+            + f"<td style='padding:6px 4px;border-bottom:1px solid #eee;text-align:right;white-space:nowrap;'>"
+            + f"<div style='font-size:11px;font-weight:bold;color:#333;'>{res_str}</div>"
+            + f"<div style='font-size:10px;color:#666;'>{sup_str}</div></td>"
+            # 点数
+            + f"<td style='padding:6px 4px;border-bottom:1px solid #eee;text-align:right;white-space:nowrap;'>"
+            + f"<div style='font-size:12px;font-weight:bold;color:{score_color};'>{score_str}</div>"
+            + f"<div style='font-size:10px;color:#666;'>{rr_str}</div></td>"
             + "</tr>"
         )
     return (
         "<div style='margin-top:16px;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.1);'>"
         "<div style='background:#1a237e;color:#fff;padding:12px 16px;'>"
-        "<h2 style='margin:0;font-size:15px;'>今週のスイング推奨銘柄</h2>"
+        "<h2 style='margin:0;font-size:15px;'>今週のスイング推奨</h2>"
         "<p style='margin:4px 0 0;font-size:11px;opacity:0.8;'>買い/売り両対応</p>"
         "</div><div style='overflow-x:auto;'><table style='width:100%;border-collapse:collapse;'>"
         "<thead>" + thead + "</thead><tbody>" + tbody + "</tbody></table></div></div>"
@@ -571,7 +602,7 @@ dt_section    = build_daytrade_table(dt_top10,    earnings_flags, MISMATCH_CODES
 swing_section = build_swing_table(swing_top10, earnings_flags, MISMATCH_CODES)
 
 html = (
-    "<html><body style='font-family:sans-serif;background:#f5f5f5;padding:20px;'>"
+    "<html><body style='font-family:sans-serif;background:#f5f5f5;padding:12px;'>"
     "<div style='max-width:600px;margin:0 auto;'>"
     "<div style='background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.1);'>"
     "<div style='background:#1a237e;color:#fff;padding:16px 20px;'>"
