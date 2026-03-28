@@ -335,15 +335,15 @@ def calc_raw(code, name):
 
         # RSIスコア（買い・売り共通、後で使う）
         if 40 <= rsi <= 60:
-            buy_rsi_score = 25; sell_rsi_score = 25
+            buy_rsi_score = 30; sell_rsi_score = 30
         elif 30 <= rsi < 40:
-            buy_rsi_score = 20; sell_rsi_score = 10
+            buy_rsi_score = 24; sell_rsi_score = 12
         elif 60 < rsi <= 70:
-            buy_rsi_score = 10; sell_rsi_score = 20
+            buy_rsi_score = 12; sell_rsi_score = 24
         elif rsi < 30:
-            buy_rsi_score = 25; sell_rsi_score = 0
+            buy_rsi_score = 30; sell_rsi_score = 0
         else:  # rsi > 70
-            buy_rsi_score = 0;  sell_rsi_score = 25
+            buy_rsi_score = 0;  sell_rsi_score = 30
 
         return {
             'code':           code,
@@ -410,17 +410,17 @@ ma_divs  = [r['ma_divergence'] for r in all_results]
 rr_buys  = [r['rr_buy_raw']    for r in all_results]
 rr_sells = [r['rr_sell_raw']   for r in all_results]
 
-buy_trend_sc  = rank_score(ma_divs,  higher_is_better=True,  max_pts=30)
-sell_trend_sc = rank_score(ma_divs,  higher_is_better=False, max_pts=30)
-buy_rr_sc     = rank_score(rr_buys,  higher_is_better=True,  max_pts=20)
-sell_rr_sc    = rank_score(rr_sells, higher_is_better=True,  max_pts=20)
+buy_trend_sc  = rank_score(ma_divs,  higher_is_better=True,  max_pts=35)
+sell_trend_sc = rank_score(ma_divs,  higher_is_better=False, max_pts=35)
+buy_rr_sc     = rank_score(rr_buys,  higher_is_better=True,  max_pts=15)
+sell_rr_sc    = rank_score(rr_sells, higher_is_better=True,  max_pts=15)
 
 for i, r in enumerate(all_results):
     # %Bスコア（15点・絶対評価）
     pct_b = r['pct_b']
     if pct_b is not None:
-        buy_bb_score  = max(0, round((1 - pct_b) * 15, 1))   # 低いほど高得点
-        sell_bb_score = max(0, round(pct_b * 15, 1))          # 高いほど高得点
+        buy_bb_score  = max(0, round((1 - pct_b) * 10, 1))   # 低いほど高得点
+        sell_bb_score = max(0, round(pct_b * 10, 1))          # 高いほど高得点
     else:
         buy_bb_score = sell_bb_score = 0
 
