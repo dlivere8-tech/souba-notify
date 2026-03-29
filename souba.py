@@ -159,55 +159,28 @@ def get_japanese_name(code):
     return code
 
 # ========================================
-# 信用倍率取得（SBI証券）
+# 信用倍率取得（Yahoo Finance Japan）
 # ========================================
 def get_shinyo_bairitu(code):
-    """SBI証券から信用倍率を取得。取得失敗時はNoneを返す。"""
+    """Yahoo Finance Japanから信用倍率を取得。取得失敗時はNoneを返す。"""
     try:
-        url = (
-            "https://site1.sbisec.co.jp/ETGate/WPLETsiR002Control"
-            f"?OutSide=on&getFlg=on&stock_cd={code}"
-            "&burl=search_stock&cat1=stock&cat2=stock&dir=stock&file=stock_detail.html"
-        )
+        url = f"https://finance.yahoo.co.jp/quote/{code}.T"
         res = requests.get(
             url,
-            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                     "Accept-Language": "ja,en-US;q=0.9,en;q=0.8"},
             timeout=5
         )
         soup = BeautifulSoup(res.text, 'html.parser')
 
-        # 信用倍率を直接探す
-        for tag in soup.find_all(['td', 'th', 'dt', 'dd']):
-            text = tag.get_text(strip=True)
-            if '信用倍率' in text:
-                val_part = text.replace('信用倍率', '').replace('倍', '').strip()
-                m = re.search(r'[\d,]+\.?\d*', val_part)
-                if m:
-                    return float(m.group().replace(',', ''))
-                nxt = tag.find_next_sibling()
-                if nxt:
-                    val_str = re.sub(r'[^\d.]', '', nxt.get_text(strip=True))
-                    if val_str:
-                        return float(val_str)
-
-        # 信用買残・信用売残から計算
-        buy_val = sell_val = None
-        for tag in soup.find_all(['td', 'th', 'dt', 'dd']):
-            text = tag.get_text(strip=True)
-            if buy_val is None and ('信用買残' in text or '貸借買残' in text):
-                nxt = tag.find_next_sibling()
-                if nxt:
-                    val_str = re.sub(r'[^\d.]', '', nxt.get_text(strip=True))
-                    if val_str:
-                        buy_val = float(val_str)
-            if sell_val is None and ('信用売残' in text or '貸借売残' in text):
-                nxt = tag.find_next_sibling()
-                if nxt:
-                    val_str = re.sub(r'[^\d.]', '', nxt.get_text(strip=True))
-                    if val_str:
-                        sell_val = float(val_str)
-        if buy_val is not None and sell_val is not None and sell_val > 0:
-            return round(buy_val / sell_val, 2)
+        # dt に「信用倍率」テキストがあれば隣の dd から値を取る
+        for dt in soup.find_all('dt'):
+            if '信用倍率' in dt.get_text(strip=True):
+                dd = dt.find_next_sibling('dd')
+                if dd:
+                    m = re.search(r'[\d,]+\.?\d*', dd.get_text(strip=True))
+                    if m:
+                        return float(m.group().replace(',', ''))
     except Exception as e:
         print(f"信用倍率取得エラー {code}: {e}")
     return None
