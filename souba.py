@@ -159,6 +159,60 @@ def get_japanese_name(code):
     return code
 
 # ========================================
+# 信用倍率取得（SBI証券）
+# ========================================
+def get_shinyo_bairitu(code):
+    """SBI証券から信用倍率を取得。取得失敗時はNoneを返す。"""
+    try:
+        url = (
+            "https://site1.sbisec.co.jp/ETGate/WPLETsiR002Control"
+            f"?OutSide=on&getFlg=on&stock_cd={code}"
+            "&burl=search_stock&cat1=stock&cat2=stock&dir=stock&file=stock_detail.html"
+        )
+        res = requests.get(
+            url,
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
+            timeout=5
+        )
+        soup = BeautifulSoup(res.text, 'html.parser')
+
+        # 信用倍率を直接探す
+        for tag in soup.find_all(['td', 'th', 'dt', 'dd']):
+            text = tag.get_text(strip=True)
+            if '信用倍率' in text:
+                val_part = text.replace('信用倍率', '').replace('倍', '').strip()
+                m = re.search(r'[\d,]+\.?\d*', val_part)
+                if m:
+                    return float(m.group().replace(',', ''))
+                nxt = tag.find_next_sibling()
+                if nxt:
+                    val_str = re.sub(r'[^\d.]', '', nxt.get_text(strip=True))
+                    if val_str:
+                        return float(val_str)
+
+        # 信用買残・信用売残から計算
+        buy_val = sell_val = None
+        for tag in soup.find_all(['td', 'th', 'dt', 'dd']):
+            text = tag.get_text(strip=True)
+            if buy_val is None and ('信用買残' in text or '貸借買残' in text):
+                nxt = tag.find_next_sibling()
+                if nxt:
+                    val_str = re.sub(r'[^\d.]', '', nxt.get_text(strip=True))
+                    if val_str:
+                        buy_val = float(val_str)
+            if sell_val is None and ('信用売残' in text or '貸借売残' in text):
+                nxt = tag.find_next_sibling()
+                if nxt:
+                    val_str = re.sub(r'[^\d.]', '', nxt.get_text(strip=True))
+                    if val_str:
+                        sell_val = float(val_str)
+        if buy_val is not None and sell_val is not None and sell_val > 0:
+            return round(buy_val / sell_val, 2)
+    except Exception as e:
+        print(f"信用倍率取得エラー {code}: {e}")
+    return None
+
+# ========================================
 # STEP 1：売買代金上位50銘柄を選出
 # ========================================
 print("STEP 1：売買代金上位50銘柄を取得中...")
@@ -466,6 +520,24 @@ for code, name in top50_stocks:
         earnings_flags[code] = flag
     time.sleep(0.1)
 
+print("STEP 4：信用倍率取得中（SBI証券）...")
+shinyo_data = {}
+for code, name in top50_stocks:
+    ratio = get_shinyo_bairitu(code)
+    if ratio is not None:
+        shinyo_data[code] = ratio
+    time.sleep(0.2)
+
+# 信用倍率によるスイングスコア補正・ratioをresultに格納
+for r in all_results:
+    ratio = shinyo_data.get(r['code'])
+    r['shinyo_ratio'] = ratio
+    if ratio is not None:
+        if r['swing_direction'] == "買い" and ratio >= 5.0:
+            r['swing_score'] = round(r['swing_score'] - 10, 1)
+        elif r['swing_direction'] == "売り" and ratio <= 0.5:
+            r['swing_score'] = round(r['swing_score'] - 10, 1)
+
 # ========================================
 # TOP10選出
 # ========================================
@@ -612,10 +684,11 @@ def build_swing_table(results, earnings_flags, mismatch_codes=None):
     if mismatch_codes is None: mismatch_codes = set()
     thead = (
         "<tr style='background:#f5f5f5;'>"
-        "<th style='padding:6px 4px;text-align:left;font-size:11px;width:35%;'>銘柄</th>"
+        "<th style='padding:6px 4px;text-align:left;font-size:11px;width:30%;'>銘柄</th>"
         "<th style='padding:6px 4px;text-align:right;font-size:11px;white-space:nowrap;'>株価</th>"
         "<th style='padding:6px 4px;text-align:right;font-size:11px;white-space:nowrap;'>状態</th>"
         "<th style='padding:6px 4px;text-align:right;font-size:11px;white-space:nowrap;'>目安</th>"
+        "<th style='padding:6px 4px;text-align:right;font-size:11px;white-space:nowrap;'>信用倍率</th>"
         "<th style='padding:6px 4px;text-align:right;font-size:11px;white-space:nowrap;'>点数</th>"
         "</tr>"
     )
@@ -647,6 +720,24 @@ def build_swing_table(results, earnings_flags, mismatch_codes=None):
         # MACDクロスボーナス表示
         macd_str  = "MACD✓" if d.get('macd_score', 0) > 0 else ""
 
+        # 信用倍率表示
+        ratio = d.get('shinyo_ratio')
+        if ratio is None:
+            shinyo_str   = "-"
+            shinyo_color = "#999"
+            shinyo_note  = ""
+        else:
+            shinyo_str = f"{ratio:.2f}倍"
+            if direction == "買い" and ratio >= 5.0:
+                shinyo_color = "#d32f2f"
+                shinyo_note  = "<div style='font-size:9px;color:#d32f2f;'>▼-10pt</div>"
+            elif direction == "売り" and ratio <= 0.5:
+                shinyo_color = "#1565c0"
+                shinyo_note  = "<div style='font-size:9px;color:#1565c0;'>▼-10pt</div>"
+            else:
+                shinyo_color = "#333"
+                shinyo_note  = ""
+
         tbody += (
             "<tr>"
             + f"<td style='padding:6px 4px;border-bottom:1px solid #eee;font-size:12px;font-weight:bold;'>"
@@ -661,6 +752,9 @@ def build_swing_table(results, earnings_flags, mismatch_codes=None):
             + f"<td style='padding:6px 4px;border-bottom:1px solid #eee;text-align:right;white-space:nowrap;'>"
             + f"<div style='font-size:11px;font-weight:bold;color:#333;'>{res_str}</div>"
             + f"<div style='font-size:10px;color:#666;'>{sup_str}</div></td>"
+            + f"<td style='padding:6px 4px;border-bottom:1px solid #eee;text-align:right;white-space:nowrap;'>"
+            + f"<div style='font-size:12px;font-weight:bold;color:{shinyo_color};'>{shinyo_str}</div>"
+            + shinyo_note + "</td>"
             + f"<td style='padding:6px 4px;border-bottom:1px solid #eee;text-align:right;white-space:nowrap;'>"
             + f"<div style='font-size:12px;font-weight:bold;color:{score_color};'>{score_str}</div>"
             + f"<div style='font-size:10px;color:#666;'>{rr_str}"
