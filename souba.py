@@ -20,53 +20,13 @@ SEND_TO        = os.environ['SEND_TO']
 jst = pytz.timezone('Asia/Tokyo')
 now = datetime.now(jst)
 now_str = now.strftime('%Y-%m-%d %H:%M')
-# 全角文字を含むため文字列連結を使用
-print("実行開始: " + now_str)
+print(f"実行開始: {now_str}")
 
 headers = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
     "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
     "Referer": "https://jp.investing.com/"
 }
-
-# ========================================
-# 追加2：騰落レシオ計算
-# ========================================
-def get_nikkei_adr_info():
-    """日経225構成銘柄から25日騰落レシオを計算"""
-    try:
-        print("騰落レシオ（25日）を計算中...")
-        total_advances = 0
-        total_declines = 0
-        
-        # 225銘柄の直近25日分の騰落数を集計
-        # 計算を安定させるため少し多めに35日分取得
-        for code in nikkei225_codes:
-            try:
-                # 速度優先のため最小限の期間を取得
-                d = yf.Ticker(code + ".T").history(period="35d")
-                if len(d) < 26: continue
-                
-                # 前日比の正負でカウント（直近25営業日）
-                diff = d['Close'].diff().tail(25)
-                total_advances += (diff > 0).sum()
-                total_declines += (diff < 0).sum()
-            except:
-                continue
-
-        if total_declines == 0: return "取得失敗"
-        
-        adr_val = (total_advances / total_declines) * 100
-        
-        status = "中立"
-        if adr_val <= 80:
-            status = "逆張り有利"
-        elif adr_val >= 120:
-            status = "買われすぎ注意"
-            
-        return "日経225騰落レシオ（25日）：" + str(round(adr_val, 2)) + "%（" + status + "）"
-    except:
-        return "取得失敗"
 
 # ========================================
 # 日本10年債金利
@@ -91,8 +51,7 @@ try:
     if pct_tag:
         jgb_pct = pct_tag.get_text(strip=True).strip('()')
 except Exception as e:
-    # 全角文字を含むため連結
-    print("JGB取得エラー: " + str(e))
+    print(f"JGB取得エラー: {e}")
 
 # ========================================
 # 日経225構成銘柄を自動取得
@@ -114,11 +73,10 @@ def fetch_nikkei225_codes():
                         break
         codes = list(dict.fromkeys(codes))
         if len(codes) >= 200:
-            # 全角文字を含むため連結
-            print("Wikipedia取得成功：" + str(len(codes)) + "銘柄")
+            print(f"Wikipedia取得成功：{len(codes)}銘柄")
             return codes
     except Exception as e:
-        print("Wikipedia取得失敗: " + str(e))
+        print(f"Wikipedia取得失敗: {e}")
 
     print("フォールバックリストを使用")
     return [
@@ -150,15 +108,13 @@ def fetch_nikkei225_codes():
     ]
 
 nikkei225_codes = fetch_nikkei225_codes()
-# 騰落レシオ情報の取得
-adr_info_text = get_nikkei_adr_info()
 
 # ========================================
 # 決算日フラグ取得
 # ========================================
 def get_earnings_flag(code):
     try:
-        ticker = yf.Ticker(code + ".T")
+        ticker = yf.Ticker(f"{code}.T")
         cal = ticker.calendar
         if cal is None: return ""
         earnings_date = None
@@ -171,7 +127,7 @@ def get_earnings_flag(code):
             earnings_date = earnings_date.replace(tzinfo=None)
         diff = (earnings_date - datetime.now().replace(tzinfo=None)).days
         if 0 <= diff <= 7:
-            return "決算" + str(earnings_date.month) + "/" + str(earnings_date.day)
+            return f"決算{earnings_date.month}/{earnings_date.day}"
         return ""
     except:
         return ""
@@ -181,7 +137,7 @@ def get_earnings_flag(code):
 # ========================================
 def get_japanese_name(code):
     try:
-        url = "https://finance.yahoo.co.jp/quote/" + code + ".T"
+        url = f"https://finance.yahoo.co.jp/quote/{code}.T"
         res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=3)
         soup = BeautifulSoup(res.text, 'html.parser')
         name_tag = soup.select_one('header h1')
@@ -194,7 +150,7 @@ def get_japanese_name(code):
     except:
         pass
     try:
-        info = yf.Ticker(code + ".T").info
+        info = yf.Ticker(f"{code}.T").info
         for key in ('displayName', 'longName', 'shortName'):
             val = info.get(key)
             if val: return val[:12]
@@ -210,7 +166,7 @@ print("STEP 1：売買代金上位50銘柄を取得中...")
 volume_scores = []
 for code in nikkei225_codes:
     try:
-        df = yf.Ticker(code + ".T").history(period="5d")
+        df = yf.Ticker(f"{code}.T").history(period="5d")
         if df.empty or len(df) < 1: continue
         latest = df.iloc[-1]
         trading_value = latest['Volume'] * latest['Close'] / 1e8
@@ -227,12 +183,16 @@ for v in volume_scores:
     top50_stocks.append((v['code'], name))
     time.sleep(0.1)
 
-print("上位50銘柄選出完了")
+print(f"上位50銘柄選出完了")
 
 # ========================================
-# HVN計算
+# HVN計算（改善①：ビン20・直近1ヶ月×2重み）
 # ========================================
 def calc_hvn(df, curr):
+    """
+    ビン数20に増加、直近1ヶ月データに×2の重みをつけてHVNを算出。
+    戻り値: (sup_price, res_price) または (None, None)
+    """
     try:
         cutoff = df['Date'].max() - pd.Timedelta(days=30)
         weights = np.where(df['Date'] >= cutoff, 2.0, 1.0)
@@ -244,7 +204,7 @@ def calc_hvn(df, curr):
         bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
 
         vol_by_bin = pd.Series(weighted_volume.values, index=df.index).groupby(pbins).sum()
-        top5        = vol_by_bin.nlargest(5).index
+        top5       = vol_by_bin.nlargest(5).index
         hvn        = sorted([bin_centers[i] for i in top5 if i < len(bin_centers)])
 
         sup = max([p for p in hvn if p < curr], default=None)
@@ -254,12 +214,17 @@ def calc_hvn(df, curr):
         return None, None
 
 # ========================================
-# MACDクロス鮮度チェック
+# MACDクロス鮮度チェック（改善④）
 # ========================================
 def calc_macd_cross(df, direction):
+    """
+    直近3日以内にMACDがシグナルをクロスし、かつ推奨方向と一致する場合10点。
+    direction: "買い" or "売り"
+    """
     try:
         macd_df = ta.macd(df['Close'], fast=12, slow=26, signal=9)
         if macd_df is None or macd_df.empty: return 0
+        # カラム名を動的取得
         macd_col   = [c for c in macd_df.columns if 'MACD_' in c and 'MACDs' not in c and 'MACDh' not in c][0]
         signal_col = [c for c in macd_df.columns if 'MACDs_' in c][0]
 
@@ -267,11 +232,12 @@ def calc_macd_cross(df, direction):
         signal_line = macd_df[signal_col].dropna()
         if len(macd_line) < 4: return 0
 
+        # 直近4本でクロス検出（=直近3日以内）
         for i in range(-3, 0):
             prev_diff = macd_line.iloc[i-1] - signal_line.iloc[i-1]
             curr_diff = macd_line.iloc[i]   - signal_line.iloc[i]
-            golden = prev_diff < 0 and curr_diff >= 0
-            dead   = prev_diff > 0 and curr_diff <= 0
+            golden = prev_diff < 0 and curr_diff >= 0  # 買いクロス
+            dead   = prev_diff > 0 and curr_diff <= 0  # 売りクロス
 
             if direction == "買い" and golden: return 10
             if direction == "売り" and dead:   return 10
@@ -284,7 +250,7 @@ def calc_macd_cross(df, direction):
 # ========================================
 def calc_raw(code, name):
     try:
-        df = yf.Ticker(code + ".T").history(period="3mo")
+        df = yf.Ticker(f"{code}.T").history(period="3mo")
         if df.empty or len(df) < 20: return None
         df.index = pd.to_datetime(df.index).tz_localize(None)
         df = df.reset_index()
@@ -309,23 +275,24 @@ def calc_raw(code, name):
 
         atr_val = atr_series.iloc[-1] if atr_series is not None and not atr_series.isna().all() else 0
 
-        # 追加1：出来高急増フィルター用計算
-        # 直近5日の平均出来高（当日含まず）
-        vol_avg5 = df['Volume'].iloc[-6:-1].mean()
-        vol_surge = latest['Volume'] >= (vol_avg5 * 2) if vol_avg5 > 0 else False
-
+        # ========================================
+        # デイトレ：ATRベース損切・利確（改善②）
+        # ========================================
         dt_direction = "買い" if change_pct >= 0 else "売り"
         if dt_direction == "買い":
-            dt_sup = curr - atr_val
-            dt_res = curr + 2 * atr_val
+            dt_sup = curr - atr_val        # 損切り = 現在値 - 1ATR
+            dt_res = curr + 2 * atr_val   # 利確   = 現在値 + 2ATR
         else:
-            dt_sup = curr + atr_val
-            dt_res = curr - 2 * atr_val
+            dt_sup = curr + atr_val        # 損切り = 現在値 + 1ATR
+            dt_res = curr - 2 * atr_val   # 利確   = 現在値 - 2ATR
         dt_rr = 2.0 if atr_val > 0 else 0.0
         dt_rr_valid = atr_val > 0
 
+        # ========================================
+        # スイング用HVN（改善①）
+        # ========================================
         sup_buy_p, res_buy_p   = calc_hvn(df, curr)
-        res_sell_p, sup_sell_p = res_buy_p, sup_buy_p
+        res_sell_p, sup_sell_p = res_buy_p, sup_buy_p  # 売りは反転
 
         rr_buy = rr_sell = 0.0
         if sup_buy_p and res_buy_p and curr != sup_buy_p:
@@ -333,6 +300,9 @@ def calc_raw(code, name):
         if res_sell_p and sup_sell_p and curr != res_sell_p:
             rr_sell = abs(curr - sup_sell_p) / abs(res_sell_p - curr)
 
+        # ========================================
+        # ボリバン %B（改善④）
+        # ========================================
         pct_b = None
         try:
             bb_cols = ta.bbands(df['Close'], length=20, std=2)
@@ -346,6 +316,9 @@ def calc_raw(code, name):
         except:
             pass
 
+        # ========================================
+        # デイトレスコア
+        # ========================================
         atr_pct   = atr_val / curr * 100
         avg_range = ((recent['High'] - recent['Low']) / recent['Close'] * 100).mean()
         trade_val = recent['Volume'].mean() * curr / 1e8
@@ -360,6 +333,7 @@ def calc_raw(code, name):
             price_s * 10
         )
 
+        # RSIスコア（買い・売り共通、後で使う）
         if 40 <= rsi <= 60:
             buy_rsi_score = 30; sell_rsi_score = 30
         elif 30 <= rsi < 40:
@@ -368,7 +342,7 @@ def calc_raw(code, name):
             buy_rsi_score = 12; sell_rsi_score = 24
         elif rsi < 30:
             buy_rsi_score = 30; sell_rsi_score = 0
-        else:
+        else:  # rsi > 70
             buy_rsi_score = 0;  sell_rsi_score = 30
 
         return {
@@ -379,7 +353,7 @@ def calc_raw(code, name):
             'rsi':            rsi,
             'trend':          trend,
             'ma_divergence':  ma_divergence,
-            'vol_surge':      vol_surge, # 追加
+            # デイトレ
             'dt_direction':   dt_direction,
             'dt_sup':         dt_sup,
             'dt_res':         dt_res,
@@ -387,8 +361,9 @@ def calc_raw(code, name):
             'dt_rr_valid':    dt_rr_valid,
             'atr_val':        atr_val,
             'daytrade_score': round(daytrade_score, 1),
-            'rr_buy_raw':      rr_buy,
-            'rr_sell_raw':     rr_sell,
+            # スイング用raw
+            'rr_buy_raw':     rr_buy,
+            'rr_sell_raw':    rr_sell,
             'buy_rsi_score':  buy_rsi_score,
             'sell_rsi_score': sell_rsi_score,
             'sup_buy_price':  sup_buy_p,
@@ -396,10 +371,11 @@ def calc_raw(code, name):
             'res_sell_price': res_sell_p,
             'sup_sell_price': sup_sell_p,
             'pct_b':          pct_b,
+            # MACDは方向確定後に計算するため一時保存用
             '_df':            df,
         }
     except Exception as e:
-        print("エラー " + code + ": " + str(e))
+        print(f"エラー {code}: {e}")
         return None
 
 print("STEP 2：全銘柄rawデータ収集中...")
@@ -410,7 +386,7 @@ for code, name in top50_stocks:
     time.sleep(0.1)
 
 # ========================================
-# 相対評価でスイングスコアを確定
+# 相対評価でスイングスコアを確定（改善④）
 # ========================================
 def rank_score(values, higher_is_better=True, max_pts=30):
     n = len(values)
@@ -440,27 +416,25 @@ buy_rr_sc     = rank_score(rr_buys,  higher_is_better=True,  max_pts=15)
 sell_rr_sc    = rank_score(rr_sells, higher_is_better=True,  max_pts=15)
 
 for i, r in enumerate(all_results):
+    # %Bスコア（15点・絶対評価）
     pct_b = r['pct_b']
     if pct_b is not None:
-        buy_bb_score  = max(0, round((1 - pct_b) * 10, 1))
-        sell_bb_score = max(0, round(pct_b * 10, 1))
+        buy_bb_score  = max(0, round((1 - pct_b) * 10, 1))   # 低いほど高得点
+        sell_bb_score = max(0, round(pct_b * 10, 1))          # 高いほど高得点
     else:
         buy_bb_score = sell_bb_score = 0
 
+    # 方向仮決定（MACDクロス計算のため）
     buy_score_tmp  = buy_trend_sc[i]  + r['buy_rsi_score']  + buy_rr_sc[i]  + buy_bb_score
     sell_score_tmp = sell_trend_sc[i] + r['sell_rsi_score'] + sell_rr_sc[i] + sell_bb_score
     tentative_dir  = "買い" if buy_score_tmp >= sell_score_tmp else "売り"
 
-    df_tmp     = r.pop('_df')
+    # MACDクロス（10点・方向確定後）
+    df_tmp     = r.pop('_df')  # DataFrameをpopして軽量化
     macd_score = calc_macd_cross(df_tmp, tentative_dir)
 
     buy_score  = buy_score_tmp  + (macd_score if tentative_dir == "買い" else 0)
     sell_score = sell_score_tmp + (macd_score if tentative_dir == "売り" else 0)
-
-    # 追加1：出来高急増ボーナス（10%加算）
-    if r['vol_surge']:
-        buy_score *= 1.1
-        sell_score *= 1.1
 
     buy_rr_valid  = (r['sup_buy_price']  is not None and r['res_buy_price']  is not None and r['rr_buy_raw']  > 0)
     sell_rr_valid = (r['res_sell_price'] is not None and r['sup_sell_price'] is not None and r['rr_sell_raw'] > 0)
@@ -523,29 +497,29 @@ def get_yf(symbol, is_rate=False):
         return None, "-", "-"
 
 dow,    dow_c,    dow_p    = get_yf("^DJI")
-sp,      sp_c,      sp_p      = get_yf("^GSPC")
+sp,     sp_c,     sp_p     = get_yf("^GSPC")
 nasdaq, nasdaq_c, nasdaq_p = get_yf("^IXIC")
-usdjpy, fx_c,      fx_p      = get_yf("JPY=X",  is_rate=True)
-nikkei, nk_c,      nk_p      = get_yf("^N225")
-growth, gr_c,      gr_p      = get_yf("2516.T")
-nkfut,  nf_c,      nf_p      = get_yf("NIY=F")
+usdjpy, fx_c,     fx_p     = get_yf("JPY=X",  is_rate=True)
+nikkei, nk_c,     nk_p     = get_yf("^N225")
+growth, gr_c,     gr_p     = get_yf("2516.T")
+nkfut,  nf_c,     nf_p     = get_yf("NIY=F")
 vix,    vix_c,    vix_p    = get_yf("^VIX",   is_rate=True)
 tnx,    tnx_c,    tnx_p    = get_yf("^TNX",   is_rate=True)
 oil,    oil_c,    oil_p    = get_yf("CL=F")
-gold,    gold_c,    gold_p    = get_yf("GC=F")
+gold,   gold_c,   gold_p   = get_yf("GC=F")
 
 def fmt(val, is_rate=False):
     if val is None: return "取得失敗"
     return f"{val:.3f}" if is_rate else f"{val:,.1f}"
 
 items = [
-    ("ダウ平均",     fmt(dow),          dow_c,     dow_p,     False),
-    ("S&P 500",      fmt(sp),            sp_c,      sp_p,      False),
+    ("ダウ平均",     fmt(dow),          dow_c,    dow_p,    False),
+    ("S&P 500",      fmt(sp),           sp_c,     sp_p,     False),
     ("Nasdaq",       fmt(nasdaq),       nasdaq_c, nasdaq_p, False),
-    ("ドル円",       fmt(usdjpy, True), fx_c,      fx_p,      True),
-    ("日経平均(現物)",fmt(nikkei),      nk_c,      nk_p,      False),
-    ("東証グロース", fmt(growth),       gr_c,      gr_p,      False),
-    ("日経先物",     fmt(nkfut),        nf_c,      nf_p,      False),
+    ("ドル円",       fmt(usdjpy, True), fx_c,     fx_p,     True),
+    ("日経平均(現物)",fmt(nikkei),      nk_c,     nk_p,     False),
+    ("東証グロース", fmt(growth),       gr_c,     gr_p,     False),
+    ("日経先物",     fmt(nkfut),        nf_c,     nf_p,     False),
     ("日本10年債金利",f"{jgb_val:.3f}" if jgb_val else "取得失敗", jgb_change, jgb_pct, True),
     ("VIX指数",      fmt(vix, True),    vix_c,    vix_p,    True),
     ("米10年債金利", fmt(tnx, True),    tnx_c,    tnx_p,    True),
@@ -595,33 +569,34 @@ def build_daytrade_table(results, earnings_flags, mismatch_codes=None):
         dir_label = "↑買い" if direction == "買い" else "↓売り"
         rsi_str   = f"RSI:{d['rsi']:.1f}"
 
+        # 損切・利確表示
         if direction == "買い":
-            res_str = "利: " + f"{d['dt_res']:,.0f}" if d['dt_res'] else "利: -"
-            sup_str = "損: " + f"{d['dt_sup']:,.0f}" if d['dt_sup'] else "損: -"
+            res_str = f"利: {d['dt_res']:,.0f}" if d['dt_res'] else "利: -"
+            sup_str = f"損: {d['dt_sup']:,.0f}" if d['dt_sup'] else "損: -"
         else:
-            res_str = "利: " + f"{d['dt_res']:,.0f}" if d['dt_res'] else "利: -"
-            sup_str = "損: " + f"{d['dt_sup']:,.0f}" if d['dt_sup'] else "損: -"
+            res_str = f"利: {d['dt_res']:,.0f}" if d['dt_res'] else "利: -"
+            sup_str = f"損: {d['dt_sup']:,.0f}" if d['dt_sup'] else "損: -"
 
         atr_str   = f"{d['atr_val']:,.0f}" if d['atr_val'] > 0 else "-"
         score_str = str(d['daytrade_score'])
 
         tbody += (
             "<tr>"
-            + "<td style='padding:6px 4px;border-bottom:1px solid #eee;font-size:12px;font-weight:bold;'>"
-            + str(i+1) + ". " + d['name'] + "<br><span style='font-size:10px;font-weight:normal;color:#666;'>(" + d['code'] + ")</span>"
-            + earnings_html + mismatch_html + "</td>"
-            + "<td style='padding:6px 4px;border-bottom:1px solid #eee;text-align:right;white-space:nowrap;'>"
-            + "<div style='font-size:12px;font-weight:bold;'>" + price_str + "</div>"
-            + "<div style='font-size:10px;color:" + pct_color + ";font-weight:bold;'>" + pct_str + "</div></td>"
-            + "<td style='padding:6px 4px;border-bottom:1px solid #eee;text-align:right;white-space:nowrap;'>"
-            + "<div style='font-size:12px;font-weight:bold;color:" + dir_color + ";'>" + dir_label + "</div>"
-            + "<div style='font-size:10px;color:#666;'>" + rsi_str + "</div></td>"
-            + "<td style='padding:6px 4px;border-bottom:1px solid #eee;text-align:right;white-space:nowrap;'>"
-            + "<div style='font-size:11px;font-weight:bold;color:#333;'>" + res_str + "</div>"
-            + "<div style='font-size:10px;color:#666;'>" + sup_str + "</div></td>"
-            + "<td style='padding:6px 4px;border-bottom:1px solid #eee;text-align:right;white-space:nowrap;'>"
-            + "<div style='font-size:12px;font-weight:bold;color:#1b5e20;'>" + score_str + "</div>"
-            + "<div style='font-size:10px;color:#666;'>ATR:" + atr_str + "</div></td>"
+            + f"<td style='padding:6px 4px;border-bottom:1px solid #eee;font-size:12px;font-weight:bold;'>"
+            + f"{i+1}. {d['name']}<br><span style='font-size:10px;font-weight:normal;color:#666;'>({d['code']})</span>"
+            + f"{earnings_html}{mismatch_html}</td>"
+            + f"<td style='padding:6px 4px;border-bottom:1px solid #eee;text-align:right;white-space:nowrap;'>"
+            + f"<div style='font-size:12px;font-weight:bold;'>{price_str}</div>"
+            + f"<div style='font-size:10px;color:{pct_color};font-weight:bold;'>{pct_str}</div></td>"
+            + f"<td style='padding:6px 4px;border-bottom:1px solid #eee;text-align:right;white-space:nowrap;'>"
+            + f"<div style='font-size:12px;font-weight:bold;color:{dir_color};'>{dir_label}</div>"
+            + f"<div style='font-size:10px;color:#666;'>{rsi_str}</div></td>"
+            + f"<td style='padding:6px 4px;border-bottom:1px solid #eee;text-align:right;white-space:nowrap;'>"
+            + f"<div style='font-size:11px;font-weight:bold;color:#333;'>{res_str}</div>"
+            + f"<div style='font-size:10px;color:#666;'>{sup_str}</div></td>"
+            + f"<td style='padding:6px 4px;border-bottom:1px solid #eee;text-align:right;white-space:nowrap;'>"
+            + f"<div style='font-size:12px;font-weight:bold;color:#1b5e20;'>{score_str}</div>"
+            + f"<div style='font-size:10px;color:#666;'>ATR:{atr_str}</div></td>"
             + "</tr>"
         )
     return (
@@ -662,44 +637,42 @@ def build_swing_table(results, earnings_flags, mismatch_codes=None):
             dir_color = "#1565c0"; dir_label = "↓売り"; score_color = "#0d47a1"
 
         trend_label = "上" if d['trend'] == '上昇' else "下"
-        status_str  = trend_label + " / RSI:" + f"{d['rsi']:.1f}"
+        status_str  = f"{trend_label} / RSI:{d['rsi']:.1f}"
 
-        res_str = "利: " + f"{d['swing_res']:,.0f}" if d['swing_res'] else "利: -"
-        sup_str = "損: " + f"{d['swing_sup']:,.0f}" if d['swing_sup'] else "損: -"
+        res_str = f"利: {d['swing_res']:,.0f}" if d['swing_res'] else "利: -"
+        sup_str = f"損: {d['swing_sup']:,.0f}" if d['swing_sup'] else "損: -"
 
         score_str = str(d['swing_score'])
-        rr_str    = "RR:" + f"{d['swing_rr']:.1f}" if d['swing_rr'] > 0 else "RR:-"
+        rr_str    = f"RR:{d['swing_rr']:.1f}" if d['swing_rr'] > 0 else "RR:-"
+        # MACDクロスボーナス表示
         macd_str  = "MACD✓" if d.get('macd_score', 0) > 0 else ""
-        # 追加1：出来高ボーナス表示
-        surge_str = " Vol急増" if d.get('vol_surge') else ""
 
         tbody += (
             "<tr>"
-            + "<td style='padding:6px 4px;border-bottom:1px solid #eee;font-size:12px;font-weight:bold;'>"
-            + str(i+1) + ". " + d['name'] + "<br><span style='font-size:10px;font-weight:normal;color:#666;'>(" + d['code'] + ")</span>"
-            + earnings_html + mismatch_html + "</td>"
-            + "<td style='padding:6px 4px;border-bottom:1px solid #eee;text-align:right;white-space:nowrap;'>"
-            + "<div style='font-size:12px;font-weight:bold;'>" + price_str + "</div>"
-            + "<div style='font-size:10px;color:" + pct_color + ";font-weight:bold;'>" + pct_str + "</div></td>"
-            + "<td style='padding:6px 4px;border-bottom:1px solid #eee;text-align:right;white-space:nowrap;'>"
-            + "<div style='font-size:12px;font-weight:bold;color:" + dir_color + ";'>" + dir_label + "</div>"
-            + "<div style='font-size:10px;color:#666;'>" + status_str + "</div></td>"
-            + "<td style='padding:6px 4px;border-bottom:1px solid #eee;text-align:right;white-space:nowrap;'>"
-            + "<div style='font-size:11px;font-weight:bold;color:#333;'>" + res_str + "</div>"
-            + "<div style='font-size:10px;color:#666;'>" + sup_str + "</div></td>"
-            + "<td style='padding:6px 4px;border-bottom:1px solid #eee;text-align:right;white-space:nowrap;'>"
-            + "<div style='font-size:12px;font-weight:bold;color:" + score_color + ";'>" + score_str + "</div>"
-            + "<div style='font-size:10px;color:#666;'>" + rr_str
-            + (" <span style='color:#ff6f00;'>★MACD</span>" if macd_str else "")
-            + (" <span style='color:#2e7d32;'>+" + surge_str + "</span>" if surge_str else "")
-            + "</div></td>"
+            + f"<td style='padding:6px 4px;border-bottom:1px solid #eee;font-size:12px;font-weight:bold;'>"
+            + f"{i+1}. {d['name']}<br><span style='font-size:10px;font-weight:normal;color:#666;'>({d['code']})</span>"
+            + f"{earnings_html}{mismatch_html}</td>"
+            + f"<td style='padding:6px 4px;border-bottom:1px solid #eee;text-align:right;white-space:nowrap;'>"
+            + f"<div style='font-size:12px;font-weight:bold;'>{price_str}</div>"
+            + f"<div style='font-size:10px;color:{pct_color};font-weight:bold;'>{pct_str}</div></td>"
+            + f"<td style='padding:6px 4px;border-bottom:1px solid #eee;text-align:right;white-space:nowrap;'>"
+            + f"<div style='font-size:12px;font-weight:bold;color:{dir_color};'>{dir_label}</div>"
+            + f"<div style='font-size:10px;color:#666;'>{status_str}</div></td>"
+            + f"<td style='padding:6px 4px;border-bottom:1px solid #eee;text-align:right;white-space:nowrap;'>"
+            + f"<div style='font-size:11px;font-weight:bold;color:#333;'>{res_str}</div>"
+            + f"<div style='font-size:10px;color:#666;'>{sup_str}</div></td>"
+            + f"<td style='padding:6px 4px;border-bottom:1px solid #eee;text-align:right;white-space:nowrap;'>"
+            + f"<div style='font-size:12px;font-weight:bold;color:{score_color};'>{score_str}</div>"
+            + f"<div style='font-size:10px;color:#666;'>{rr_str}"
+            + (f" <span style='color:#ff6f00;'>&#9733;MACD</span>" if macd_str else "")
+            + f"</div></td>"
             + "</tr>"
         )
     return (
         "<div style='margin-top:16px;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.1);'>"
         "<div style='background:#1a237e;color:#fff;padding:12px 16px;'>"
         "<h2 style='margin:0;font-size:15px;'>今週のスイング推奨</h2>"
-        "<p style='margin:4px 0 0;font-size:11px;opacity:0.8;'>トレンド30・RSI25・RR20・%B15・MACD10</p>"
+        "<p style='margin:4px 0 0;font-size:11px;opacity:0.8;'>トレンド35・RSI30・RR15・%B10・MACD10</p>"
         "</div><div style='overflow-x:auto;'><table style='width:100%;border-collapse:collapse;'>"
         "<thead>" + thead + "</thead><tbody>" + tbody + "</tbody></table></div></div>"
     )
@@ -707,18 +680,9 @@ def build_swing_table(results, earnings_flags, mismatch_codes=None):
 dt_section    = build_daytrade_table(dt_top10,    earnings_flags, MISMATCH_CODES)
 swing_section = build_swing_table(swing_top10, earnings_flags, MISMATCH_CODES)
 
-# 冒頭の相場環境セクション
-adr_html = (
-    "<div style='background:#fff;border-radius:8px;padding:12px 16px;margin-bottom:16px;box-shadow:0 2px 8px rgba(0,0,0,0.1);'>"
-    "<h3 style='margin:0 0 8px;font-size:14px;color:#333;'>【相場環境チェック】</h3>"
-    "<p style='margin:0;font-size:14px;font-weight:bold;color:#1a237e;'>" + adr_info_text + "</p>"
-    "</div>"
-)
-
 html = (
     "<html><body style='font-family:sans-serif;background:#f5f5f5;padding:12px;'>"
     "<div style='max-width:600px;margin:0 auto;'>"
-    + adr_html + # 追加2の表示
     "<div style='background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.1);'>"
     "<div style='background:#1a237e;color:#fff;padding:16px 20px;'>"
     "<h2 style='margin:0;font-size:18px;'>最新マーケットデータ</h2>"
@@ -753,5 +717,4 @@ try:
         smtp.sendmail(GMAIL_ADDRESS, SEND_TO, msg.as_bytes())
     print("メール送信完了！")
 except Exception as e:
-    # 全角文字を含むため連結
-    print("メール送信失敗: " + str(e))
+    print(f"メール送信失敗: {e}")
