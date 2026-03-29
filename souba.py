@@ -162,27 +162,37 @@ def get_japanese_name(code):
 # 信用倍率取得（Yahoo Finance Japan）
 # ========================================
 def get_shinyo_bairitu(code):
-    """Yahoo Finance Japanから信用倍率を取得。取得失敗時はNoneを返す。"""
-    try:
-        url = f"https://finance.yahoo.co.jp/quote/{code}.T"
-        res = requests.get(
-            url,
-            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                     "Accept-Language": "ja,en-US;q=0.9,en;q=0.8"},
-            timeout=5
-        )
-        soup = BeautifulSoup(res.text, 'html.parser')
-
-        # dt に「信用倍率」テキストがあれば隣の dd から値を取る
-        for dt in soup.find_all('dt'):
-            if '信用倍率' in dt.get_text(strip=True):
-                dd = dt.find_next_sibling('dd')
-                if dd:
-                    m = re.search(r'[\d,]+\.?\d*', dd.get_text(strip=True))
-                    if m:
-                        return float(m.group().replace(',', ''))
-    except Exception as e:
-        print(f"信用倍率取得エラー {code}: {e}")
+    """Yahoo Finance Japanから信用倍率を取得。取得失敗時はNoneを返す。
+    500エラー時は3s待ってリトライ（最大2回）。
+    """
+    url = f"https://finance.yahoo.co.jp/quote/{code}.T"
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+               "Accept-Language": "ja,en-US;q=0.9,en;q=0.8"}
+    for attempt in range(3):
+        try:
+            res = requests.get(url, headers=headers, timeout=5)
+            if res.status_code == 500:
+                if attempt < 2:
+                    wait = 10 * (attempt + 1)  # 1回目:10s, 2回目:20s
+                    time.sleep(wait)
+                    continue
+                return None
+            if res.status_code != 200:
+                return None
+            soup = BeautifulSoup(res.text, 'html.parser')
+            for dt in soup.find_all('dt'):
+                if '信用倍率' in dt.get_text(strip=True):
+                    dd = dt.find_next_sibling('dd')
+                    if dd:
+                        m = re.search(r'[\d,]+\.?\d*', dd.get_text(strip=True))
+                        if m:
+                            return float(m.group().replace(',', ''))
+            return None
+        except Exception as e:
+            if attempt < 2:
+                time.sleep(10 * (attempt + 1))
+            else:
+                print(f"信用倍率取得エラー {code}: {e}")
     return None
 
 # ========================================
@@ -493,13 +503,15 @@ for code, name in top50_stocks:
         earnings_flags[code] = flag
     time.sleep(0.1)
 
-print("STEP 4：信用倍率取得中（SBI証券）...")
+print("STEP 4：信用倍率取得中（Yahoo Finance Japan）...")
 shinyo_data = {}
-for code, name in top50_stocks:
+for i, (code, name) in enumerate(top50_stocks):
     ratio = get_shinyo_bairitu(code)
     if ratio is not None:
         shinyo_data[code] = ratio
-    time.sleep(0.2)
+    time.sleep(0.5)
+    if (i + 1) % 20 == 0:
+        time.sleep(10)  # 20件ごとにバッチ休止
 
 # 信用倍率によるスイングスコア補正・ratioをresultに格納
 for r in all_results:
