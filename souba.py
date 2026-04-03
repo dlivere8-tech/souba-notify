@@ -283,11 +283,91 @@ def calc_macd_cross(df, direction):
         return 0
 
 # ========================================
+# ジグザグ + MA75 トレンド判定
+# ========================================
+def calc_zigzag_trend(df, atr_val, ma75_col='MA75'):
+    """
+    直近20本のジグザグ分析でトレンドを判定。
+    転換点基準: ATR×1.5以上の値動きで高値・安値が更新された時点。
+    戻り値: (zz_trend, ma75_up)
+      zz_trend : '上昇' / '下降' / 'ボックス'
+      ma75_up  : True(上向き) / False(下向き) / None(判定不能)
+    """
+    recent = df.tail(21).dropna(subset=['High', 'Low', 'Close']).tail(20).copy().reset_index(drop=True)
+    threshold = atr_val * 1.5
+    if not np.isfinite(threshold) or threshold <= 0 or len(recent) < 5:
+        raise ValueError("threshold or data insufficient")
+
+    # ジグザグ転換点を検出
+    direction    = None          # 'up' or 'down'
+    ref_high     = recent['High'].iloc[0]
+    ref_low      = recent['Low'].iloc[0]
+    ref_high_idx = 0
+    ref_low_idx  = 0
+    pivots = []  # (idx, price, 'H' or 'L')
+
+    for i in range(1, len(recent)):
+        h = recent['High'].iloc[i]
+        l = recent['Low'].iloc[i]
+
+        if direction is None:
+            if h > ref_high: ref_high = h; ref_high_idx = i
+            if l < ref_low:  ref_low  = l; ref_low_idx  = i
+            if ref_high - ref_low >= threshold:
+                if ref_high_idx < ref_low_idx:
+                    pivots.append((ref_high_idx, ref_high, 'H'))
+                    direction = 'down'
+                    ref_low = l; ref_low_idx = i
+                else:
+                    pivots.append((ref_low_idx, ref_low, 'L'))
+                    direction = 'up'
+                    ref_high = h; ref_high_idx = i
+        elif direction == 'up':
+            if h > ref_high: ref_high = h; ref_high_idx = i
+            if ref_high - l >= threshold:
+                pivots.append((ref_high_idx, ref_high, 'H'))
+                direction = 'down'
+                ref_low = l; ref_low_idx = i
+        else:  # down
+            if l < ref_low: ref_low = l; ref_low_idx = i
+            if h - ref_low >= threshold:
+                pivots.append((ref_low_idx, ref_low, 'L'))
+                direction = 'up'
+                ref_high = h; ref_high_idx = i
+
+    highs = [p[1] for p in pivots if p[2] == 'H']
+    lows  = [p[1] for p in pivots if p[2] == 'L']
+
+    if len(highs) >= 2 and len(lows) >= 2:
+        hh = highs[-1] > highs[-2]
+        hl = lows[-1]  > lows[-2]
+        lh = highs[-1] < highs[-2]
+        ll = lows[-1]  < lows[-2]
+        if hh and hl:   zz_trend = '上昇'
+        elif lh and ll: zz_trend = '下降'
+        else:           zz_trend = 'ボックス'
+    elif len(highs) >= 2:
+        zz_trend = '下降' if highs[-1] < highs[-2] else 'ボックス'
+    elif len(lows) >= 2:
+        zz_trend = '上昇' if lows[-1] > lows[-2] else 'ボックス'
+    else:
+        zz_trend = 'ボックス'
+
+    # MA75 方向判定（直近6本で5日分の傾き）
+    ma75_up = None
+    if ma75_col in df.columns:
+        ma75_vals = df[ma75_col].dropna().tail(6)
+        if len(ma75_vals) >= 6:
+            ma75_up = bool(ma75_vals.iloc[-1] > ma75_vals.iloc[0])
+
+    return zz_trend, ma75_up
+
+# ========================================
 # STEP 2：データ取得・raw値収集
 # ========================================
 def calc_raw(code, name):
     try:
-        df = yf.Ticker(f"{code}.T").history(period="3mo")
+        df = yf.Ticker(f"{code}.T").history(period="4mo")
         if df.empty or len(df) < 20: return None
         df.index = pd.to_datetime(df.index).tz_localize(None)
         df = df.reset_index()
@@ -307,10 +387,26 @@ def calc_raw(code, name):
         ma25 = latest['MA25']
         ma75 = latest['MA75']
         ma_divergence = (ma25 - ma75) / ma75 * 100 if not pd.isna(ma25) and not pd.isna(ma75) and ma75 != 0 else 0.0
-        trend_up = ma_divergence > 0
-        trend    = '上昇' if trend_up else '下落'
 
-        atr_val = atr_series.iloc[-1] if atr_series is not None and not atr_series.isna().all() else 0
+        # ジグザグ + MA75 トレンド判定（エラー時はMA乖離でフォールバック）
+        try:
+            zz_trend, ma75_up = calc_zigzag_trend(df, atr_val, ma75_col='MA75')
+            if zz_trend == '上昇':
+                buy_trend_score  = 35 if ma75_up is True else 20
+                sell_trend_score = 0
+            elif zz_trend == '下降':
+                buy_trend_score  = 0
+                sell_trend_score = 35 if ma75_up is False else 20
+            else:  # ボックス
+                buy_trend_score = sell_trend_score = 15
+            trend = zz_trend
+        except Exception:
+            zz_trend = '上昇' if ma_divergence > 0 else '下降'
+            buy_trend_score  = 20 if ma_divergence > 0 else 0
+            sell_trend_score = 0  if ma_divergence > 0 else 20
+            trend = zz_trend
+
+        atr_val = atr_series.dropna().iloc[-1] if atr_series is not None and not atr_series.isna().all() else 0
 
         # ========================================
         # デイトレ：ATRベース損切・利確（改善②）
@@ -383,13 +479,15 @@ def calc_raw(code, name):
             buy_rsi_score = 0;  sell_rsi_score = 30
 
         return {
-            'code':           code,
-            'name':           name,
-            'price':          curr,
-            'change_pct':     change_pct,
-            'rsi':            rsi,
-            'trend':          trend,
-            'ma_divergence':  ma_divergence,
+            'code':             code,
+            'name':             name,
+            'price':            curr,
+            'change_pct':       change_pct,
+            'rsi':              rsi,
+            'trend':            trend,
+            'ma_divergence':    ma_divergence,
+            'buy_trend_score':  buy_trend_score,
+            'sell_trend_score': sell_trend_score,
             # デイトレ
             'dt_direction':   dt_direction,
             'dt_sup':         dt_sup,
@@ -443,17 +541,14 @@ def rank_score(values, higher_is_better=True, max_pts=30):
     else:
         return [(n - r) / (n - 1) * max_pts for r in ranks]
 
-ma_divs  = [r['ma_divergence'] for r in all_results]
-rr_buys  = [r['rr_buy_raw']    for r in all_results]
-rr_sells = [r['rr_sell_raw']   for r in all_results]
+rr_buys  = [r['rr_buy_raw']  for r in all_results]
+rr_sells = [r['rr_sell_raw'] for r in all_results]
 
-buy_trend_sc  = rank_score(ma_divs,  higher_is_better=True,  max_pts=35)
-sell_trend_sc = rank_score(ma_divs,  higher_is_better=False, max_pts=35)
-buy_rr_sc     = rank_score(rr_buys,  higher_is_better=True,  max_pts=15)
-sell_rr_sc    = rank_score(rr_sells, higher_is_better=True,  max_pts=15)
+buy_rr_sc  = rank_score(rr_buys,  higher_is_better=True, max_pts=15)
+sell_rr_sc = rank_score(rr_sells, higher_is_better=True, max_pts=15)
 
 for i, r in enumerate(all_results):
-    # %Bスコア（15点・絶対評価）
+    # %Bスコア（10点・絶対評価）
     pct_b = r['pct_b']
     if pct_b is not None:
         buy_bb_score  = max(0, round((1 - pct_b) * 10, 1))   # 低いほど高得点
@@ -462,8 +557,9 @@ for i, r in enumerate(all_results):
         buy_bb_score = sell_bb_score = 0
 
     # 方向仮決定（MACDクロス計算のため）
-    buy_score_tmp  = buy_trend_sc[i]  + r['buy_rsi_score']  + buy_rr_sc[i]  + buy_bb_score
-    sell_score_tmp = sell_trend_sc[i] + r['sell_rsi_score'] + sell_rr_sc[i] + sell_bb_score
+    # トレンド35点はジグザグ+MA75の絶対スコアを直接使用
+    buy_score_tmp  = r['buy_trend_score']  + r['buy_rsi_score']  + buy_rr_sc[i]  + buy_bb_score
+    sell_score_tmp = r['sell_trend_score'] + r['sell_rsi_score'] + sell_rr_sc[i] + sell_bb_score
     tentative_dir  = "買い" if buy_score_tmp >= sell_score_tmp else "売り"
 
     # MACDクロス（10点・方向確定後）
@@ -694,7 +790,9 @@ def build_swing_table(results, earnings_flags, mismatch_codes=None):
         else:
             dir_color = "#1565c0"; dir_label = "↓売り"; score_color = "#0d47a1"
 
-        trend_label = "上" if d['trend'] == '上昇' else "下"
+        if d['trend'] == '上昇':   trend_label = "↑上昇"
+        elif d['trend'] == '下降': trend_label = "↓下降"
+        else:                       trend_label = "→箱"
         status_str  = f"{trend_label} / RSI:{d['rsi']:.1f}"
 
         res_str = f"利: {d['swing_res']:,.0f}" if d['swing_res'] else "利: -"
