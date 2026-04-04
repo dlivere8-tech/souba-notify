@@ -1,0 +1,846 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>株式ウォッチリスト</title>
+  <style>
+    :root {
+      --bg: #111;
+      --surface: #1c1c1e;
+      --surface2: #2c2c2e;
+      --accent: #0a84ff;
+      --green: #30d158;
+      --red: #ff453a;
+      --yellow: #ffd60a;
+      --text: #f2f2f7;
+      --muted: #8e8e93;
+      --border: #38383a;
+      --r: 12px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      padding: 14px;
+      max-width: 600px;
+      margin: 0 auto;
+    }
+    .app-header { margin-bottom: 14px; }
+    .app-title { font-size: 20px; font-weight: 700; }
+    .app-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+    .toolbar { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; align-items: center; }
+    .btn {
+      display: inline-flex; align-items: center; gap: 5px;
+      border: none; border-radius: 8px; padding: 10px 16px;
+      font-size: 15px; font-weight: 600; cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+      transition: opacity .15s;
+    }
+    .btn:active { opacity: .7; }
+    .btn:disabled { opacity: .4; cursor: not-allowed; }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-secondary { background: var(--surface2); color: var(--text); }
+    .btn-sm { padding: 6px 12px; font-size: 13px; border-radius: 6px; }
+
+    .settings-panel {
+      background: var(--surface); border-radius: var(--r);
+      padding: 14px; margin-bottom: 14px; border: 1px solid var(--border);
+    }
+    .settings-title {
+      font-size: 12px; color: var(--muted); text-transform: uppercase;
+      letter-spacing: .05em; margin-bottom: 10px;
+    }
+    .ticker-grid {
+      display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-bottom: 12px;
+    }
+    .ticker-item { display: flex; flex-direction: column; gap: 3px; }
+    .ticker-item label { font-size: 11px; color: var(--muted); text-align: center; }
+    .ticker-input {
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 8px; color: var(--text); padding: 8px 4px;
+      font-size: 16px; width: 100%; text-align: center; -webkit-appearance: none;
+    }
+    .ticker-input:focus { outline: none; border-color: var(--accent); }
+
+    .cards-container { display: flex; flex-direction: column; gap: 12px; }
+
+    .stock-card {
+      background: var(--surface); border-radius: var(--r);
+      padding: 14px; border: 1px solid var(--border);
+    }
+    .stock-card.err { border-color: var(--red); }
+
+    .card-hdr {
+      display: flex; justify-content: space-between; align-items: flex-start;
+      margin-bottom: 12px;
+    }
+    .stock-code { font-size: 12px; color: var(--muted); }
+    .stock-name { font-size: 17px; font-weight: 600; line-height: 1.2; margin-top: 2px; }
+    .price-block { text-align: right; }
+    .price-val { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .price-chg { font-size: 13px; font-weight: 600; margin-top: 1px; }
+    .pos { color: var(--green); }
+    .neg { color: var(--red); }
+
+    .scores-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+    .score-box { background: var(--surface2); border-radius: 10px; padding: 10px 12px; }
+    .score-label { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+    .score-main { display: flex; align-items: baseline; gap: 6px; }
+    .score-num {
+      font-size: 28px; font-weight: 700; line-height: 1;
+      font-variant-numeric: tabular-nums;
+    }
+    .score-num.high { color: var(--green); }
+    .score-num.mid  { color: var(--yellow); }
+    .score-num.low  { color: var(--red); }
+    .score-dir { font-size: 12px; font-weight: 600; padding: 2px 6px; border-radius: 4px; }
+    .dir-buy { background: rgba(48,209,88,.15); color: var(--green); }
+    .dir-sell { background: rgba(255,69,58,.15); color: var(--red); }
+    .score-bar {
+      height: 3px; background: var(--border); border-radius: 2px;
+      margin-top: 6px; overflow: hidden;
+    }
+    .score-bar-fill { height: 100%; border-radius: 2px; transition: width .4s ease; }
+
+    .sl-tp-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+    .sl-box {
+      background: rgba(255,69,58,.07);
+      border: 1px solid rgba(255,69,58,.25);
+      border-radius: 8px; padding: 7px 10px;
+    }
+    .tp-box {
+      background: rgba(48,209,88,.07);
+      border: 1px solid rgba(48,209,88,.25);
+      border-radius: 8px; padding: 7px 10px;
+    }
+    .sl-label { font-size: 10px; color: var(--red); text-transform: uppercase; letter-spacing: .04em; }
+    .tp-label { font-size: 10px; color: var(--green); text-transform: uppercase; letter-spacing: .04em; }
+    .sl-val { font-size: 15px; font-weight: 600; color: var(--red); margin-top: 2px; font-variant-numeric: tabular-nums; }
+    .tp-val { font-size: 15px; font-weight: 600; color: var(--green); margin-top: 2px; font-variant-numeric: tabular-nums; }
+
+    .metrics-grid {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 10px;
+    }
+    .metric { background: var(--surface2); border-radius: 8px; padding: 7px 10px; }
+    .metric-label {
+      font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em;
+    }
+    .metric-val { font-size: 15px; font-weight: 600; margin-top: 2px; font-variant-numeric: tabular-nums; }
+    .trend-up { color: var(--green); }
+    .trend-down { color: var(--red); }
+
+    .card-ftr { display: flex; justify-content: flex-end; }
+    .err-msg { font-size: 13px; color: var(--red); margin: 4px 0 8px; }
+
+    .spinner {
+      display: inline-block; width: 18px; height: 18px;
+      border: 2px solid var(--border); border-top-color: var(--accent);
+      border-radius: 50%; animation: spin .8s linear infinite; flex-shrink: 0;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .empty-card {
+      background: var(--surface); border-radius: var(--r);
+      border: 1px dashed var(--border);
+      padding: 20px; text-align: center; color: var(--muted); font-size: 13px;
+    }
+    .note {
+      font-size: 11px; color: var(--muted); text-align: center;
+      margin-top: 16px; line-height: 1.7; padding: 0 4px;
+    }
+
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #f2f2f7; --surface: #fff; --surface2: #f2f2f7;
+        --text: #1c1c1e; --muted: #8e8e93; --border: #c6c6c8;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-header">
+    <div class="app-title">株式ウォッチリスト</div>
+    <div class="app-sub" id="lastUpdated">未更新</div>
+  </div>
+
+  <div class="toolbar">
+    <button class="btn btn-primary" id="updateAllBtn" onclick="updateAll()">↻ 全銘柄更新</button>
+    <button class="btn btn-secondary" onclick="toggleSettings()">⚙ 設定</button>
+  </div>
+
+  <div id="settingsPanel" style="display:none" class="settings-panel">
+    <div class="settings-title">ウォッチリスト（4桁銘柄コード）</div>
+    <div class="ticker-grid" id="tickerGrid"></div>
+    <button class="btn btn-primary btn-sm" onclick="saveAndApply()">保存して適用</button>
+  </div>
+
+  <div class="cards-container" id="cardsContainer"></div>
+
+  <div class="note">
+    スコアはウォッチリスト内での相対評価（スイング：MA乖離・RR）と絶対評価（デイトレ・RSI・%B・MACD）の混合です。<br>
+    損切り・利確はデイトレATRベース（1ATR損切・2ATR利確）。<br>
+    データはYahoo Financeより取得（CORS proxy経由）。
+  </div>
+
+<script>
+'use strict';
+
+// ─────────────────────────────────────────────
+// Config
+// ─────────────────────────────────────────────
+const STORAGE_KEY   = 'watchlist_v2';
+const DEFAULT_TICKERS = ['7203','6758','9984','8306','6501','9432','4502','7011','6861','8035'];
+const CORS_PROXY    = 'https://corsproxy.io/?url=';
+const YF_CHART_BASE = 'https://query2.finance.yahoo.com/v8/finance/chart/';
+const ALLORIGINS    = 'https://api.allorigins.win/get?url=';
+
+let tickers = [...DEFAULT_TICKERS];
+let stockResults = {};   // code -> { raw, swingScoreBase, shinyo, shinyoLoading, error, loading }
+let settingsOpen = false;
+let isUpdating   = false;
+
+// ─────────────────────────────────────────────
+// Technical Indicators
+// ─────────────────────────────────────────────
+
+function calcRSI(closes, period = 14) {
+  const n = closes.length;
+  if (n < period + 2) return 50;
+  let avgGain = 0, avgLoss = 0;
+  for (let i = 1; i <= period; i++) {
+    const d = closes[i] - closes[i - 1];
+    if (d > 0) avgGain += d; else avgLoss -= d;
+  }
+  avgGain /= period;
+  avgLoss /= period;
+  for (let i = period + 1; i < n; i++) {
+    const d = closes[i] - closes[i - 1];
+    avgGain = (avgGain * (period - 1) + Math.max(d, 0)) / period;
+    avgLoss = (avgLoss * (period - 1) + Math.max(-d, 0)) / period;
+  }
+  if (avgLoss === 0) return 100;
+  return 100 - 100 / (1 + avgGain / avgLoss);
+}
+
+function smaLast(arr, period) {
+  if (arr.length < period) return null;
+  return arr.slice(-period).reduce((a, b) => a + b, 0) / period;
+}
+
+function calcATR(highs, lows, closes, period = 14) {
+  const n = highs.length;
+  if (n < period + 1) return 0;
+  const trs = [];
+  for (let i = 1; i < n; i++) {
+    trs.push(Math.max(
+      highs[i] - lows[i],
+      Math.abs(highs[i] - closes[i - 1]),
+      Math.abs(lows[i]  - closes[i - 1])
+    ));
+  }
+  let atr = trs.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  for (let i = period; i < trs.length; i++) {
+    atr = (atr * (period - 1) + trs[i]) / period;
+  }
+  return atr;
+}
+
+function calcBBPctB(closes, period = 20, nStd = 2) {
+  if (closes.length < period) return null;
+  const sl  = closes.slice(-period);
+  const mean = sl.reduce((a, b) => a + b, 0) / period;
+  const std  = Math.sqrt(sl.reduce((a, b) => a + (b - mean) ** 2, 0) / period);
+  if (std === 0) return null;
+  const upper = mean + nStd * std;
+  const lower = mean - nStd * std;
+  return (closes[closes.length - 1] - lower) / (upper - lower);
+}
+
+function calcEMA(arr, period) {
+  if (arr.length < period) return [];
+  const k = 2 / (period + 1);
+  let ema = arr.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  const out = [ema];
+  for (let i = period; i < arr.length; i++) {
+    ema = arr[i] * k + ema * (1 - k);
+    out.push(ema);
+  }
+  return out; // length = arr.length - period + 1
+}
+
+function calcMACDLines(closes) {
+  const n = closes.length;
+  if (n < 34) return { macd: [], signal: [] };
+  const ema12 = calcEMA(closes, 12);    // length n-11
+  const ema26 = calcEMA(closes, 26);    // length n-25
+  // ema12[i+14] aligns with ema26[i] (both correspond to closes[i+25])
+  const macdFull = ema26.map((v, i) => ema12[i + 14] - v);   // length n-25
+  if (macdFull.length < 9) return { macd: macdFull, signal: [] };
+  const sigFull  = calcEMA(macdFull, 9);                      // length n-33
+  return { macd: macdFull.slice(8), signal: sigFull };        // aligned, both length n-33
+}
+
+function macdCrossScore(macd, signal, direction) {
+  const n = Math.min(macd.length, signal.length);
+  if (n < 4) return 0;
+  for (let i = n - 3; i < n; i++) {
+    const prev = macd[i - 1] - signal[i - 1];
+    const curr = macd[i]     - signal[i];
+    if (direction === '買い' && prev < 0 && curr >= 0) return 10;
+    if (direction === '売り' && prev > 0 && curr <= 0) return 10;
+  }
+  return 0;
+}
+
+function calcHVN(dates, closes, volumes, curr, bins = 20) {
+  const n = closes.length;
+  if (n < bins) return { sup: null, res: null };
+  const lastDate = dates[n - 1];
+  const cutoff   = lastDate - 30 * 86400 * 1000;
+  const minP = Math.min(...closes);
+  const maxP = Math.max(...closes);
+  if (maxP === minP) return { sup: null, res: null };
+  const binSz = (maxP - minP) / bins;
+  const bVols  = new Float64Array(bins);
+  for (let i = 0; i < n; i++) {
+    const w = dates[i] >= cutoff ? 2 : 1;
+    const b = Math.min(Math.floor((closes[i] - minP) / binSz), bins - 1);
+    bVols[b] += volumes[i] * w;
+  }
+  const top5 = Array.from(bVols)
+    .map((v, i) => ({ v, c: minP + (i + 0.5) * binSz }))
+    .sort((a, b) => b.v - a.v)
+    .slice(0, 5)
+    .map(x => x.c)
+    .sort((a, b) => a - b);
+  const supArr = top5.filter(p => p < curr);
+  const resArr = top5.filter(p => p > curr);
+  return {
+    sup: supArr.length ? Math.max(...supArr) : null,
+    res: resArr.length ? Math.min(...resArr) : null
+  };
+}
+
+// ─────────────────────────────────────────────
+// Scoring
+// ─────────────────────────────────────────────
+
+function rankScore(values, higherIsBetter, maxPts) {
+  const n = values.length;
+  if (n <= 1) return new Array(n).fill(maxPts);
+  const sorted = values.map((v, i) => ({ v, i })).sort((a, b) => a.v - b.v);
+  const ranks = new Array(n);
+  let i = 0;
+  while (i < n) {
+    let j = i;
+    while (j < n && sorted[j].v === sorted[i].v) j++;
+    const avg = (i + 1 + j) / 2;
+    for (let k = i; k < j; k++) ranks[sorted[k].i] = avg;
+    i = j;
+  }
+  return ranks.map(r =>
+    higherIsBetter ? (r - 1) / (n - 1) * maxPts : (n - r) / (n - 1) * maxPts
+  );
+}
+
+function rsiScore(rsi) {
+  if      (rsi >= 40 && rsi <= 60) return { buy: 30, sell: 30 };
+  else if (rsi >= 30 && rsi <  40) return { buy: 24, sell: 12 };
+  else if (rsi >  60 && rsi <= 70) return { buy: 12, sell: 24 };
+  else if (rsi <  30)              return { buy: 30, sell:  0 };
+  else                             return { buy:  0, sell: 30 }; // > 70
+}
+
+/**
+ * Compute raw values (no swing score yet — that needs cross-stock ranking).
+ */
+function computeRaw(code, name, dates, highs, lows, closes, volumes) {
+  const n = closes.length;
+  if (n < 20) return null;
+
+  const curr      = closes[n - 1];
+  const prev      = closes[n - 2];
+  const changePct = prev ? (curr - prev) / prev * 100 : 0;
+
+  const rsi       = calcRSI(closes);
+  const ma25      = smaLast(closes, 25);
+  const ma75      = smaLast(closes, 75);
+  const maDiv     = (ma25 && ma75 && ma75 !== 0) ? (ma25 - ma75) / ma75 * 100 : 0;
+  const trend     = maDiv > 0 ? '上昇' : '下降';
+  const atr       = calcATR(highs, lows, closes);
+
+  // Last 20 bars
+  const rH = highs.slice(-20),   rL = lows.slice(-20),
+        rC = closes.slice(-20),  rV = volumes.slice(-20);
+  const atrPct   = curr > 0 ? atr / curr * 100 : 0;
+  const avgRange = rC.reduce((s, c, i) => s + (rH[i] - rL[i]) / c * 100, 0) / 20;
+  const volMean  = rV.reduce((a, b) => a + b, 0) / 20;
+  const volStd   = Math.sqrt(rV.reduce((a, b) => a + (b - volMean) ** 2, 0) / 20);
+  const volCv    = volStd / (volMean + 1e-10);
+  const tradeVal = volMean * curr / 1e8;
+  const priceS   = (curr >= 500 && curr <= 15000) ? 1.0 : 0.3;
+
+  const daytradeScore = round1(
+    Math.min(atrPct / 5 * 30, 30) +
+    Math.min(avgRange / 5 * 25, 25) +
+    Math.min(tradeVal / 500 * 25, 25) +
+    Math.max(10 - volCv * 5, 0) +
+    priceS * 10
+  );
+
+  // Daytrade direction, SL/TP
+  const dtDir = changePct >= 0 ? '買い' : '売り';
+  const dtSup = dtDir === '買い' ? curr - atr : curr + atr;
+  const dtRes = dtDir === '買い' ? curr + 2 * atr : curr - 2 * atr;
+
+  // HVN
+  const hvn = calcHVN(dates, closes, volumes, curr);
+  let rrBuy = 0, rrSell = 0;
+  if (hvn.sup !== null && hvn.res !== null) {
+    if (curr !== hvn.sup) rrBuy  = Math.abs(hvn.res - curr) / Math.abs(curr - hvn.sup);
+    if (curr !== hvn.res) rrSell = Math.abs(curr - hvn.sup) / Math.abs(hvn.res - curr);
+  }
+
+  const pctB  = calcBBPctB(closes);
+  const rsiSc = rsiScore(rsi);
+
+  return {
+    code, name, curr, changePct, rsi, trend, maDiv,
+    dtDir, dtSup, dtRes,
+    daytradeScore,
+    rrBuyRaw: rrBuy, rrSellRaw: rrSell,
+    buyRsiScore:  rsiSc.buy,
+    sellRsiScore: rsiSc.sell,
+    supBuy: hvn.sup, resBuy: hvn.res,
+    pctB,
+    _closes: closes, _highs: highs, _lows: lows, _volumes: volumes, _dates: dates
+  };
+}
+
+/**
+ * Compute swing scores via relative ranking across all raws.
+ * Sets r.swingDir, r.swingScoreBase, r.swingSup, r.swingRes.
+ */
+function computeSwingScores(raws) {
+  const n = raws.length;
+  if (n === 0) return;
+
+  const maDivs  = raws.map(r => r.maDiv);
+  const rrBuys  = raws.map(r => r.rrBuyRaw);
+  const rrSells = raws.map(r => r.rrSellRaw);
+
+  const buyTrend  = rankScore(maDivs,  true,  35);
+  const sellTrend = rankScore(maDivs,  false, 35);
+  const buyRR     = rankScore(rrBuys,  true,  15);
+  const sellRR    = rankScore(rrSells, true,  15);
+
+  for (let i = 0; i < n; i++) {
+    const r    = raws[i];
+    const pctB = r.pctB;
+    const buyBB  = pctB !== null ? Math.max(0, round1((1 - pctB) * 10)) : 0;
+    const sellBB = pctB !== null ? Math.max(0, round1(pctB * 10))        : 0;
+
+    const buyTmp  = buyTrend[i]  + r.buyRsiScore  + buyRR[i]  + buyBB;
+    const sellTmp = sellTrend[i] + r.sellRsiScore + sellRR[i] + sellBB;
+    const tentDir = buyTmp >= sellTmp ? '買い' : '売り';
+
+    const { macd, signal } = calcMACDLines(r._closes);
+    const macdPts = macdCrossScore(macd, signal, tentDir);
+
+    const buyScore  = buyTmp  + (tentDir === '買い' ? macdPts : 0);
+    const sellScore = sellTmp + (tentDir === '売り' ? macdPts : 0);
+
+    if (buyScore >= sellScore) {
+      r.swingDir       = '買い';
+      r.swingScoreBase = round1(buyScore);
+      r.swingSup       = r.supBuy;
+      r.swingRes       = r.resBuy;
+    } else {
+      r.swingDir       = '売り';
+      r.swingScoreBase = round1(sellScore);
+      r.swingSup       = r.resBuy;   // for short: res becomes SL
+      r.swingRes       = r.supBuy;   // for short: sup becomes TP
+    }
+  }
+}
+
+function getFinalSwingScore(raw, shinyo) {
+  let s = raw.swingScoreBase ?? 0;
+  if (shinyo != null) {
+    if (raw.swingDir === '買い' && shinyo >= 5.0) s -= 10;
+    if (raw.swingDir === '売り' && shinyo <= 0.5) s -= 10;
+  }
+  return round1(s);
+}
+
+// ─────────────────────────────────────────────
+// Data Fetching
+// ─────────────────────────────────────────────
+
+async function fetchYFChart(code) {
+  const url     = `${YF_CHART_BASE}${code}.T?interval=1d&range=6mo`;
+  const proxied = CORS_PROXY + encodeURIComponent(url);
+  const res = await fetch(proxied);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const json   = await res.json();
+  const result = json?.chart?.result?.[0];
+  if (!result) throw new Error('データなし');
+
+  const meta = result.meta;
+  const name = meta.shortName || meta.longName || code;
+  const ts   = result.timestamp;
+  const q    = result.indicators.quote[0];
+
+  // Filter nulls
+  const dates = [], highs = [], lows = [], closes = [], volumes = [];
+  for (let i = 0; i < ts.length; i++) {
+    if (q.close[i] != null && q.high[i] != null && q.low[i] != null && q.volume[i] != null) {
+      dates.push(ts[i] * 1000);
+      highs.push(q.high[i]);
+      lows.push(q.low[i]);
+      closes.push(q.close[i]);
+      volumes.push(q.volume[i]);
+    }
+  }
+  if (closes.length < 20) throw new Error('データ不足');
+  return { name, dates, highs, lows, closes, volumes };
+}
+
+async function fetchShinyoBairitu(code) {
+  try {
+    const url     = `https://finance.yahoo.co.jp/quote/${code}.T`;
+    const proxied = ALLORIGINS + encodeURIComponent(url);
+    const ctrl    = new AbortController();
+    const tid     = setTimeout(() => ctrl.abort(), 10000);
+    const res     = await fetch(proxied, { signal: ctrl.signal });
+    clearTimeout(tid);
+    const json    = await res.json();
+    const html    = json.contents;
+    if (!html) return null;
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    for (const dt of doc.querySelectorAll('dt')) {
+      if (dt.textContent.includes('信用倍率')) {
+        const dd = dt.nextElementSibling;
+        if (dd) {
+          const m = dd.textContent.replace(/,/g, '').match(/[\d.]+/);
+          if (m) return parseFloat(m[0]);
+        }
+      }
+    }
+  } catch {
+    // silent fail
+  }
+  return null;
+}
+
+// ─────────────────────────────────────────────
+// Update Logic
+// ─────────────────────────────────────────────
+
+async function updateAll() {
+  if (isUpdating) return;
+  isUpdating = true;
+  const btn = document.getElementById('updateAllBtn');
+  btn.disabled = true;
+  btn.textContent = '更新中...';
+
+  const active = tickers.filter(t => t.trim() !== '');
+  renderLoadingAll(active);
+
+  // 1. Fetch OHLCV in parallel
+  const results = await Promise.all(active.map(async code => {
+    try {
+      const data = await fetchYFChart(code);
+      const raw  = computeRaw(code, data.name, data.dates, data.highs, data.lows, data.closes, data.volumes);
+      if (!raw) throw new Error('計算エラー');
+      return { code, raw, error: null };
+    } catch (e) {
+      return { code, raw: null, error: e.message };
+    }
+  }));
+
+  // 2. Relative swing scoring
+  const goodRaws = results.filter(r => r.raw).map(r => r.raw);
+  computeSwingScores(goodRaws);
+
+  // 3. Store
+  for (const { code, raw, error } of results) {
+    stockResults[code] = {
+      raw, shinyo: null, shinyoLoading: !!raw, error, loading: false
+    };
+  }
+
+  renderCards();
+  updateLastUpdated();
+  btn.disabled = false;
+  btn.textContent = '↻ 全銘柄更新';
+  isUpdating = false;
+
+  // 4. Fetch credit ratios async
+  for (const { code, raw } of results) {
+    if (!raw) continue;
+    fetchShinyoBairitu(code).then(ratio => {
+      if (!stockResults[code]) return;
+      stockResults[code].shinyo = ratio;
+      stockResults[code].shinyoLoading = false;
+      renderCardFor(code);
+    });
+  }
+}
+
+async function updateSingle(code) {
+  stockResults[code] = { raw: null, shinyo: null, shinyoLoading: false, error: null, loading: true };
+  renderCardFor(code);
+
+  try {
+    const data = await fetchYFChart(code);
+    const raw  = computeRaw(code, data.name, data.dates, data.highs, data.lows, data.closes, data.volumes);
+    if (!raw) throw new Error('計算エラー');
+
+    stockResults[code] = { raw, shinyo: null, shinyoLoading: true, error: null, loading: false };
+
+    // Re-rank among all loaded stocks
+    const allRaws = tickers
+      .filter(t => t.trim() !== '' && stockResults[t]?.raw)
+      .map(t => stockResults[t].raw);
+    computeSwingScores(allRaws);
+
+    renderCards();
+    updateLastUpdated();
+
+    fetchShinyoBairitu(code).then(ratio => {
+      if (!stockResults[code]) return;
+      stockResults[code].shinyo = ratio;
+      stockResults[code].shinyoLoading = false;
+      renderCardFor(code);
+    });
+  } catch (e) {
+    stockResults[code] = { raw: null, shinyo: null, shinyoLoading: false, error: e.message, loading: false };
+    renderCardFor(code);
+  }
+}
+
+// ─────────────────────────────────────────────
+// Rendering
+// ─────────────────────────────────────────────
+
+function renderLoadingAll(codes) {
+  document.getElementById('cardsContainer').innerHTML = codes.map(code => `
+    <div class="stock-card" id="card-${code}">
+      <div class="card-hdr">
+        <div><div class="stock-code">${code}</div><div class="stock-name">取得中...</div></div>
+        <div class="spinner"></div>
+      </div>
+    </div>`).join('');
+}
+
+function renderCards() {
+  const active = tickers.filter(t => t.trim() !== '');
+  if (!active.length) {
+    document.getElementById('cardsContainer').innerHTML =
+      '<div class="empty-card">設定から銘柄コードを入力してください</div>';
+    return;
+  }
+  document.getElementById('cardsContainer').innerHTML = active.map(buildCard).join('');
+}
+
+function renderCardFor(code) {
+  const el = document.getElementById(`card-${code}`);
+  if (!el) return;
+  const tmp = document.createElement('div');
+  tmp.innerHTML = buildCard(code);
+  el.replaceWith(tmp.firstElementChild);
+}
+
+function buildCard(code) {
+  const e = stockResults[code];
+
+  if (!e || e.loading) {
+    return `<div class="stock-card" id="card-${code}">
+      <div class="card-hdr">
+        <div><div class="stock-code">${code}</div><div class="stock-name">取得中...</div></div>
+        <div class="spinner"></div>
+      </div></div>`;
+  }
+  if (e.error) {
+    return `<div class="stock-card err" id="card-${code}">
+      <div class="card-hdr">
+        <div><div class="stock-code">${code}</div>
+          <div class="stock-name" style="color:var(--red)">取得エラー</div></div>
+        <button class="btn btn-secondary btn-sm" onclick="updateSingle('${code}')">再試行</button>
+      </div>
+      <div class="err-msg">${e.error}</div>
+    </div>`;
+  }
+  if (!e.raw) {
+    return `<div class="stock-card" id="card-${code}">
+      <div class="card-hdr">
+        <div class="stock-code">${code}</div>
+        <button class="btn btn-secondary btn-sm" onclick="updateSingle('${code}')">↻ 更新</button>
+      </div>
+    </div>`;
+  }
+
+  const r          = e.raw;
+  const shinyo     = e.shinyo;
+  const swScore    = getFinalSwingScore(r, shinyo);
+  const dtScore    = r.daytradeScore;
+
+  const chgSign    = r.changePct >= 0 ? '+' : '';
+  const chgClass   = r.changePct >= 0 ? 'pos' : 'neg';
+  const trendClass = r.trend === '上昇' ? 'trend-up' : 'trend-down';
+  const dtDirCls   = r.dtDir   === '買い' ? 'dir-buy' : 'dir-sell';
+  const swDirCls   = r.swingDir === '買い' ? 'dir-buy' : 'dir-sell';
+
+  let shinyoHtml;
+  if (e.shinyoLoading) {
+    shinyoHtml = '<span class="spinner" style="width:13px;height:13px;border-width:1.5px"></span>';
+  } else {
+    shinyoHtml = shinyo != null ? shinyo.toFixed(2) : 'N/A';
+  }
+
+  return `<div class="stock-card" id="card-${code}">
+    <div class="card-hdr">
+      <div>
+        <div class="stock-code">${code}</div>
+        <div class="stock-name">${r.name}</div>
+      </div>
+      <div class="price-block">
+        <div class="price-val">¥${fmtP(r.curr)}</div>
+        <div class="price-chg ${chgClass}">${chgSign}${r.changePct.toFixed(2)}%</div>
+      </div>
+    </div>
+
+    <div class="scores-row">
+      <div class="score-box">
+        <div class="score-label">デイトレスコア</div>
+        <div class="score-main">
+          <span class="score-num ${sColor(dtScore)}">${dtScore}</span>
+          <span class="score-dir ${dtDirCls}">${r.dtDir}</span>
+        </div>
+        <div class="score-bar">
+          <div class="score-bar-fill" style="width:${clamp(dtScore)}%;background:${sBg(dtScore)}"></div>
+        </div>
+      </div>
+      <div class="score-box">
+        <div class="score-label">スイングスコア</div>
+        <div class="score-main">
+          <span class="score-num ${sColor(swScore)}">${swScore}</span>
+          <span class="score-dir ${swDirCls}">${r.swingDir}</span>
+        </div>
+        <div class="score-bar">
+          <div class="score-bar-fill" style="width:${clamp(swScore)}%;background:${sBg(swScore)}"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sl-tp-row">
+      <div class="sl-box">
+        <div class="sl-label">損切り（デイ・${r.dtDir}）</div>
+        <div class="sl-val">¥${fmtP(r.dtSup)}</div>
+      </div>
+      <div class="tp-box">
+        <div class="tp-label">利確（デイ・${r.dtDir}）</div>
+        <div class="tp-val">¥${fmtP(r.dtRes)}</div>
+      </div>
+    </div>
+
+    <div class="metrics-grid">
+      <div class="metric">
+        <div class="metric-label">RSI(14)</div>
+        <div class="metric-val">${r.rsi.toFixed(1)}</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">信用倍率</div>
+        <div class="metric-val">${shinyoHtml}</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">トレンド</div>
+        <div class="metric-val ${trendClass}">${r.trend}</div>
+      </div>
+    </div>
+
+    <div class="card-ftr">
+      <button class="btn btn-secondary btn-sm" onclick="updateSingle('${code}')">↻ 更新</button>
+    </div>
+  </div>`;
+}
+
+function updateLastUpdated() {
+  const now = new Date();
+  document.getElementById('lastUpdated').textContent =
+    '最終更新: ' + now.toLocaleString('ja-JP', {
+      month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit'
+    });
+}
+
+// ─────────────────────────────────────────────
+// Settings
+// ─────────────────────────────────────────────
+
+function toggleSettings() {
+  settingsOpen = !settingsOpen;
+  document.getElementById('settingsPanel').style.display = settingsOpen ? 'block' : 'none';
+}
+
+function renderTickerInputs() {
+  document.getElementById('tickerGrid').innerHTML = tickers.map((code, i) => `
+    <div class="ticker-item">
+      <label>${i + 1}</label>
+      <input type="text" class="ticker-input" id="ti-${i}"
+        value="${code}" maxlength="4" inputmode="numeric" placeholder="----">
+    </div>`).join('');
+}
+
+function saveAndApply() {
+  tickers = tickers.map((_, i) => {
+    const el = document.getElementById(`ti-${i}`);
+    return el ? el.value.trim().replace(/[^0-9]/g, '') : '';
+  });
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(tickers));
+  toggleSettings();
+  renderTickerInputs();
+  renderCards();
+}
+
+// ─────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────
+
+function round1(v) { return Math.round(v * 10) / 10; }
+function clamp(v)  { return Math.max(0, Math.min(100, v)); }
+function fmtP(p)   {
+  if (p == null || isNaN(p)) return '-';
+  return Math.round(p).toLocaleString('ja-JP');
+}
+function sColor(s) {
+  if (s >= 70) return 'high';
+  if (s >= 50) return 'mid';
+  return 'low';
+}
+function sBg(s) {
+  if (s >= 70) return 'var(--green)';
+  if (s >= 50) return 'var(--yellow)';
+  return 'var(--red)';
+}
+
+// ─────────────────────────────────────────────
+// Init
+// ─────────────────────────────────────────────
+
+(function init() {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      const p = JSON.parse(saved);
+      if (Array.isArray(p) && p.length === 10) tickers = p;
+    }
+  } catch {}
+  renderTickerInputs();
+  renderCards();
+})();
+</script>
+</body>
+</html>
