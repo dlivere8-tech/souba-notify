@@ -458,7 +458,7 @@ async function proxyFetch(targetUrl, timeoutMs = 22000) {
     new Promise((resolve, reject) => {
       setTimeout(async () => {
         try {
-          const res = await fetch(url, { signal: _timeoutSignal(timeoutMs - delayMs) });
+          const res = await fetch(url, { signal: _timeoutSignal(timeoutMs - delayMs), cache: 'no-store' });
           resolve(await (transform ? transform(res) : (res.ok ? res : Promise.reject(new Error(res.status)))));
         } catch (e) { reject(e); }
       }, delayMs);
@@ -475,7 +475,7 @@ async function proxyFetch(targetUrl, timeoutMs = 22000) {
 // Data Fetching
 // ─────────────────────────────────────────────
 async function _fetchYFChartOnce(code) {
-  const yfUrl = `${YF_CHART_BASE}${code}.T?interval=1d&range=6mo`;
+  const yfUrl = `${YF_CHART_BASE}${code}.T?interval=1d&range=6mo&_t=${Date.now()}`;
   const res   = await proxyFetch(yfUrl, 22000);
   const json  = await res.json();
   const result = json?.chart?.result?.[0];
