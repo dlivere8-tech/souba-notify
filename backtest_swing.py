@@ -429,8 +429,9 @@ def run_backtest(all_data_dict, eval_dates):
 
             if result is None:
                 # 5日以内にTP/SLどちらも未到達 → 5日目引け値で強制決済
-                result = 'forced'
                 exit_price = float(hold_bars.iloc[-1]['Close'])
+                temp_pnl = (exit_price - entry_price) if direction == "買い" else (entry_price - exit_price)
+                result = 'forced_win' if temp_pnl > 0 else 'forced_loss'
 
             if direction == "買い":
                 pnl     = exit_price - entry_price
@@ -463,16 +464,17 @@ def calc_metrics(trade_records, direction_records):
     if not trade_records:
         return {}
 
-    wins   = [t for t in trade_records if t['result'] == 'win']
-    losses = [t for t in trade_records if t['result'] == 'loss']
-    forced = [t for t in trade_records if t['result'] == 'forced']
-    n      = len(trade_records)
+    tp_wins  = [t for t in trade_records if t['result'] == 'win']
+    sl_losses= [t for t in trade_records if t['result'] == 'loss']
+    f_wins   = [t for t in trade_records if t['result'] == 'forced_win']
+    f_losses = [t for t in trade_records if t['result'] == 'forced_loss']
+    wins     = tp_wins  + f_wins
+    losses   = sl_losses + f_losses
+    n        = len(trade_records)
 
     win_rate     = len(wins) / n * 100
-    gross_profit = sum(t['pnl_pct'] for t in wins)  + \
-                   sum(t['pnl_pct'] for t in [f for f in forced if f['pnl_pct'] > 0])
-    gross_loss   = abs(sum(t['pnl_pct'] for t in losses)) + \
-                   abs(sum(t['pnl_pct'] for t in [f for f in forced if f['pnl_pct'] < 0]))
+    gross_profit = sum(t['pnl_pct'] for t in wins)
+    gross_loss   = abs(sum(t['pnl_pct'] for t in losses))
     pf           = gross_profit / gross_loss if gross_loss > 0 else float('inf')
     avg_rr       = np.mean([t['rr_real'] for t in trade_records])
     avg_mfe      = np.mean([t['mfe_pct'] for t in trade_records])
@@ -484,8 +486,11 @@ def calc_metrics(trade_records, direction_records):
     return {
         'n':          n,
         'wins':       len(wins),
+        'tp_wins':    len(tp_wins),
+        'f_wins':     len(f_wins),
         'losses':     len(losses),
-        'forced':     len(forced),
+        'sl_losses':  len(sl_losses),
+        'f_losses':   len(f_losses),
         'win_rate':   round(win_rate, 1),
         'pf':         round(pf, 2),
         'avg_rr':     round(avg_rr, 2),
@@ -538,7 +543,7 @@ if __name__ == '__main__':
     cal_df = next(iter(all_data.values()))
     trading_days = list(cal_df[(cal_df.index >= pd.Timestamp(eval_start)) &
                                (cal_df.index <= pd.Timestamp(eval_end))].index)
-    eval_dates = [d.to_pydatetime() for d in trading_days[::5]]
+    eval_dates = [d.to_pydatetime() for d in trading_days[::1]]
 
     if not eval_dates:
         print("ERROR: 評価日が生成できませんでした")
@@ -558,7 +563,8 @@ if __name__ == '__main__':
     print("【バックテスト結果】")
     print("=" * 60)
     print(f"  総トレード数  : {metrics['n']}")
-    print(f"  勝ち(TP到達)  : {metrics['wins']}  負け(SL到達): {metrics['losses']}  強制決済: {metrics['forced']}")
+    print(f"  勝ち計        : {metrics['wins']}  (TP到達:{metrics['tp_wins']} + 強制益:{metrics['f_wins']})")
+    print(f"  負け計        : {metrics['losses']}  (SL到達:{metrics['sl_losses']} + 強制損:{metrics['f_losses']})")
     print(f"  勝率          : {metrics['win_rate']:.1f}%")
     print(f"  プロフィットF : {metrics['pf']:.2f}")
     print(f"  平均RR(実績)  : {metrics['avg_rr']:.2f}")
@@ -584,9 +590,12 @@ if __name__ == '__main__':
         writer = csv.writer(f)
         writer.writerow(['指標', '値'])
         writer.writerow(['総トレード数',         metrics['n']])
-        writer.writerow(['勝ち(TP到達)',          metrics['wins']])
-        writer.writerow(['負け(SL到達)',          metrics['losses']])
-        writer.writerow(['強制決済',              metrics['forced']])
+        writer.writerow(['勝ち計',                metrics['wins']])
+        writer.writerow(['  うちTP到達',          metrics['tp_wins']])
+        writer.writerow(['  うち強制益',          metrics['f_wins']])
+        writer.writerow(['負け計',                metrics['losses']])
+        writer.writerow(['  うちSL到達',          metrics['sl_losses']])
+        writer.writerow(['  うち強制損',          metrics['f_losses']])
         writer.writerow(['勝率',                  f"{metrics['win_rate']:.1f}%"])
         writer.writerow(['プロフィットファクター', f"{metrics['pf']:.2f}"])
         writer.writerow(['平均RR(実績)',           f"{metrics['avg_rr']:.2f}"])
