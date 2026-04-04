@@ -283,7 +283,7 @@ function macdCrossScore(macd, signal, dir) {
   return 0;
 }
 
-function calcHVN(dates, closes, volumes, curr, bins = 20) {
+function calcHVN(dates, closes, volumes, curr, bins = 20, minDist = 0) {
   const n = closes.length;
   if (n < bins) return { sup: null, res: null };
   const cutoff = dates[n-1] - 30 * 86400000;
