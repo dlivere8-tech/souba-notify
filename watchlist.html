@@ -6,238 +6,185 @@
   <title>株式ウォッチリスト</title>
   <style>
     :root {
-      --bg: #111;
-      --surface: #1c1c1e;
-      --surface2: #2c2c2e;
-      --accent: #0a84ff;
-      --green: #30d158;
-      --red: #ff453a;
-      --yellow: #ffd60a;
-      --text: #f2f2f7;
-      --muted: #8e8e93;
-      --border: #38383a;
-      --r: 12px;
+      --bg: #111; --surface: #1c1c1e; --surface2: #2c2c2e;
+      --accent: #0a84ff; --green: #30d158; --red: #ff453a; --yellow: #ffd60a;
+      --text: #f2f2f7; --muted: #8e8e93; --border: #38383a; --r: 12px;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      padding: 14px;
-      max-width: 600px;
-      margin: 0 auto;
+      background: var(--bg); color: var(--text);
+      padding: 12px; max-width: 600px; margin: 0 auto;
     }
-    .app-header { margin-bottom: 14px; }
-    .app-title { font-size: 20px; font-weight: 700; }
-    .app-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
-    .toolbar { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; align-items: center; }
+
+    /* ── Header ── */
+    .app-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+    .app-title { font-size: 18px; font-weight: 700; }
+    .app-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
     .btn {
       display: inline-flex; align-items: center; gap: 5px;
       border: none; border-radius: 8px; padding: 10px 16px;
-      font-size: 15px; font-weight: 600; cursor: pointer;
-      -webkit-tap-highlight-color: transparent;
-      transition: opacity .15s;
+      font-size: 14px; font-weight: 600; cursor: pointer;
+      -webkit-tap-highlight-color: transparent; transition: opacity .15s;
     }
     .btn:active { opacity: .7; }
     .btn:disabled { opacity: .4; cursor: not-allowed; }
     .btn-primary { background: var(--accent); color: #fff; }
     .btn-secondary { background: var(--surface2); color: var(--text); }
-    .btn-sm { padding: 6px 12px; font-size: 13px; border-radius: 6px; }
+    .btn-sm { padding: 7px 12px; font-size: 13px; border-radius: 7px; }
+    .btn-danger { background: rgba(255,69,58,.15); color: var(--red); border: 1px solid rgba(255,69,58,.3); }
 
-    .settings-panel {
-      background: var(--surface); border-radius: var(--r);
-      padding: 14px; margin-bottom: 14px; border: 1px solid var(--border);
+    /* ── Tabs ── */
+    .tabs-wrap { margin-bottom: 10px; }
+    .tabs-grid {
+      display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px;
     }
-    .settings-title {
-      font-size: 12px; color: var(--muted); text-transform: uppercase;
-      letter-spacing: .05em; margin-bottom: 10px;
+    .tab-btn {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; padding: 6px 4px; cursor: pointer; text-align: center;
+      font-size: 11px; color: var(--muted); line-height: 1.3;
+      -webkit-tap-highlight-color: transparent; transition: all .15s;
+      min-height: 44px; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 1px;
     }
-    .ticker-grid {
-      display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-bottom: 12px;
+    .tab-btn .tab-num { font-size: 10px; color: var(--muted); }
+    .tab-btn .tab-name {
+      font-size: 11px; font-weight: 600; color: var(--text);
+      max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      width: 100%;
     }
-    .ticker-item { display: flex; flex-direction: column; gap: 3px; }
-    .ticker-item label { font-size: 11px; color: var(--muted); text-align: center; }
-    .ticker-input {
-      background: var(--surface2); border: 1px solid var(--border);
-      border-radius: 8px; color: var(--text); padding: 8px 4px;
-      font-size: 16px; width: 100%; text-align: center; -webkit-appearance: none;
-    }
-    .ticker-input:focus { outline: none; border-color: var(--accent); }
+    .tab-btn.empty .tab-name { color: var(--muted); font-weight: 400; }
+    .tab-btn.active { border-color: var(--accent); background: rgba(10,132,255,.12); }
+    .tab-btn.active .tab-num { color: var(--accent); }
 
-    .cards-container { display: flex; flex-direction: column; gap: 12px; }
-
-    .stock-card {
-      background: var(--surface); border-radius: var(--r);
-      padding: 14px; border: 1px solid var(--border);
+    /* ── Selector Panel ── */
+    .selector-panel {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--r); padding: 14px; margin-bottom: 12px;
     }
-    .stock-card.err { border-color: var(--red); }
-
-    .card-hdr {
-      display: flex; justify-content: space-between; align-items: flex-start;
-      margin-bottom: 12px;
+    .selector-title {
+      font-size: 12px; color: var(--muted); margin-bottom: 10px;
+      text-transform: uppercase; letter-spacing: .04em;
     }
-    .stock-code { font-size: 12px; color: var(--muted); }
-    .stock-name { font-size: 17px; font-weight: 600; line-height: 1.2; margin-top: 2px; }
-    .price-block { text-align: right; }
-    .price-val { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
-    .price-chg { font-size: 13px; font-weight: 600; margin-top: 1px; }
-    .pos { color: var(--green); }
-    .neg { color: var(--red); }
-
-    .scores-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
-    .score-box { background: var(--surface2); border-radius: 10px; padding: 10px 12px; }
-    .score-label { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
-    .score-main { display: flex; align-items: baseline; gap: 6px; }
-    .score-num {
-      font-size: 28px; font-weight: 700; line-height: 1;
-      font-variant-numeric: tabular-nums;
-    }
-    .score-num.high { color: var(--green); }
-    .score-num.mid  { color: var(--yellow); }
-    .score-num.low  { color: var(--red); }
-    .score-dir { font-size: 12px; font-weight: 600; padding: 2px 6px; border-radius: 4px; }
-    .dir-buy { background: rgba(48,209,88,.15); color: var(--green); }
-    .dir-sell { background: rgba(255,69,58,.15); color: var(--red); }
-    .score-bar {
-      height: 3px; background: var(--border); border-radius: 2px;
-      margin-top: 6px; overflow: hidden;
-    }
-    .score-bar-fill { height: 100%; border-radius: 2px; transition: width .4s ease; }
-
-    .sl-tp-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
-    .sl-box {
-      background: rgba(255,69,58,.07);
-      border: 1px solid rgba(255,69,58,.25);
-      border-radius: 8px; padding: 7px 10px;
-    }
-    .tp-box {
-      background: rgba(48,209,88,.07);
-      border: 1px solid rgba(48,209,88,.25);
-      border-radius: 8px; padding: 7px 10px;
-    }
-    .sl-label { font-size: 10px; color: var(--red); text-transform: uppercase; letter-spacing: .04em; }
-    .tp-label { font-size: 10px; color: var(--green); text-transform: uppercase; letter-spacing: .04em; }
-    .sl-val { font-size: 15px; font-weight: 600; color: var(--red); margin-top: 2px; font-variant-numeric: tabular-nums; }
-    .tp-val { font-size: 15px; font-weight: 600; color: var(--green); margin-top: 2px; font-variant-numeric: tabular-nums; }
-
-    .metrics-grid {
-      display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 10px;
-    }
-    .metric { background: var(--surface2); border-radius: 8px; padding: 7px 10px; }
-    .metric-label {
-      font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em;
-    }
-    .metric-val { font-size: 15px; font-weight: 600; margin-top: 2px; font-variant-numeric: tabular-nums; }
-    .trend-up { color: var(--green); }
-    .trend-down { color: var(--red); }
-
-    .card-ftr { display: flex; justify-content: flex-end; }
-    .err-msg { font-size: 13px; color: var(--red); margin: 4px 0 8px; }
-
-    .spinner {
-      display: inline-block; width: 18px; height: 18px;
-      border: 2px solid var(--border); border-top-color: var(--accent);
-      border-radius: 50%; animation: spin .8s linear infinite; flex-shrink: 0;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
-
-    .empty-card {
-      background: var(--surface); border-radius: var(--r);
-      border: 1px dashed var(--border);
-      padding: 20px; text-align: center; color: var(--muted); font-size: 13px;
-    }
-    .note {
-      font-size: 11px; color: var(--muted); text-align: center;
-      margin-top: 16px; line-height: 1.7; padding: 0 4px;
-    }
-
-    @media (prefers-color-scheme: light) {
-      :root {
-        --bg: #f2f2f7; --surface: #fff; --surface2: #f2f2f7;
-        --text: #1c1c1e; --muted: #8e8e93; --border: #c6c6c8;
-      }
-    }
-
-    /* Search overlay */
-    .search-overlay {
-      position: fixed; inset: 0; background: rgba(0,0,0,.7);
-      z-index: 1000; display: flex; align-items: flex-start;
-      justify-content: center; padding: 20px 14px;
-    }
-    .search-modal {
-      background: var(--surface); border-radius: var(--r);
-      width: 100%; max-width: 480px; padding: 14px;
-      border: 1px solid var(--border);
-    }
-    .search-modal-hdr {
-      display: flex; align-items: center; gap: 8px; margin-bottom: 10px;
-    }
+    .search-row { display: flex; gap: 6px; margin-bottom: 8px; }
     .search-input {
       flex: 1; background: var(--surface2); border: 1px solid var(--border);
       border-radius: 8px; color: var(--text); padding: 10px 12px;
       font-size: 16px; -webkit-appearance: none;
     }
     .search-input:focus { outline: none; border-color: var(--accent); }
-    .search-result-item {
+    .search-results { max-height: 220px; overflow-y: auto; }
+    .search-item {
       display: flex; justify-content: space-between; align-items: center;
-      padding: 11px 10px; border-radius: 8px; cursor: pointer;
-      -webkit-tap-highlight-color: transparent;
+      padding: 10px 8px; border-radius: 8px; cursor: pointer;
+      -webkit-tap-highlight-color: transparent; border: 1px solid transparent;
     }
-    .search-result-item:active { background: var(--surface2); }
-    .search-res-name { font-size: 14px; font-weight: 500; }
-    .search-res-code { font-size: 12px; color: var(--muted); margin-left: 8px; }
-    .search-empty { font-size: 13px; color: var(--muted); text-align: center; padding: 16px; }
+    .search-item:active { background: var(--surface2); }
+    .search-item.selected { border-color: var(--accent); background: rgba(10,132,255,.1); }
+    .search-item-name { font-size: 13px; font-weight: 500; }
+    .search-item-code { font-size: 12px; color: var(--muted); background: var(--surface2); padding: 2px 6px; border-radius: 4px; }
+    .search-empty { font-size: 13px; color: var(--muted); text-align: center; padding: 16px 0; }
+    .selector-footer { display: flex; gap: 8px; margin-top: 10px; }
 
-    .ticker-item-wrap { display: flex; flex-direction: column; gap: 3px; }
-    .ticker-input-row { display: flex; gap: 3px; }
-    .search-btn {
-      background: var(--surface2); border: 1px solid var(--border);
-      border-radius: 8px; color: var(--muted); padding: 0 6px;
-      font-size: 13px; cursor: pointer; flex-shrink: 0;
-      -webkit-tap-highlight-color: transparent;
+    /* ── Cards ── */
+    .cards-container { display: flex; flex-direction: column; gap: 10px; }
+    .stock-card {
+      background: var(--surface); border-radius: var(--r);
+      padding: 14px; border: 1px solid var(--border);
     }
-    .search-btn:active { opacity: .7; }
+    .stock-card.err { border-color: var(--red); }
+    .card-hdr { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; }
+    .stock-code { font-size: 11px; color: var(--muted); }
+    .stock-name { font-size: 16px; font-weight: 600; line-height: 1.2; margin-top: 2px; }
+    .price-block { text-align: right; }
+    .price-val { font-size: 19px; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .price-chg { font-size: 13px; font-weight: 600; margin-top: 1px; }
+    .pos { color: var(--green); } .neg { color: var(--red); }
 
-    .score-note { font-size: 10px; color: var(--muted); margin-top: 3px; }
+    .scores-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+    .score-box { background: var(--surface2); border-radius: 10px; padding: 10px 12px; }
+    .score-label { font-size: 10px; color: var(--muted); margin-bottom: 4px; text-transform: uppercase; letter-spacing: .04em; }
+    .score-main { display: flex; align-items: baseline; gap: 6px; }
+    .score-num { font-size: 26px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+    .score-num.high { color: var(--green); }
+    .score-num.mid  { color: var(--yellow); }
+    .score-num.low  { color: var(--red); }
+    .score-dir { font-size: 11px; font-weight: 600; padding: 2px 6px; border-radius: 4px; }
+    .dir-buy  { background: rgba(48,209,88,.15); color: var(--green); }
+    .dir-sell { background: rgba(255,69,58,.15); color: var(--red); }
+    .score-bar { height: 3px; background: var(--border); border-radius: 2px; margin-top: 6px; overflow: hidden; }
+    .score-bar-fill { height: 100%; border-radius: 2px; transition: width .4s; }
+    .score-note { font-size: 10px; color: var(--muted); margin-top: 4px; line-height: 1.3; }
+    .score-excluded { font-size: 10px; color: var(--red); margin-top: 4px; }
+
+    .sl-tp-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+    .sl-box { background: rgba(255,69,58,.07); border: 1px solid rgba(255,69,58,.25); border-radius: 8px; padding: 7px 10px; }
+    .tp-box { background: rgba(48,209,88,.07); border: 1px solid rgba(48,209,88,.25); border-radius: 8px; padding: 7px 10px; }
+    .sl-label { font-size: 10px; color: var(--red); text-transform: uppercase; letter-spacing: .04em; }
+    .tp-label { font-size: 10px; color: var(--green); text-transform: uppercase; letter-spacing: .04em; }
+    .sl-val { font-size: 14px; font-weight: 600; color: var(--red); margin-top: 2px; font-variant-numeric: tabular-nums; }
+    .tp-val { font-size: 14px; font-weight: 600; color: var(--green); margin-top: 2px; font-variant-numeric: tabular-nums; }
+
+    .metrics-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 10px; }
+    .metric { background: var(--surface2); border-radius: 8px; padding: 7px 10px; }
+    .metric-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+    .metric-val { font-size: 14px; font-weight: 600; margin-top: 2px; font-variant-numeric: tabular-nums; }
+    .trend-up { color: var(--green); } .trend-down { color: var(--red); }
+
+    .card-ftr { display: flex; justify-content: flex-end; }
+    .err-msg { font-size: 13px; color: var(--red); margin: 4px 0 8px; }
+    .empty-card { background: var(--surface); border-radius: var(--r); border: 1px dashed var(--border); padding: 20px; text-align: center; color: var(--muted); font-size: 13px; }
+
+    .spinner { display: inline-block; width: 18px; height: 18px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; flex-shrink: 0; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .note { font-size: 11px; color: var(--muted); text-align: center; margin-top: 14px; line-height: 1.7; padding: 0 4px; }
+
+    @media (prefers-color-scheme: light) {
+      :root { --bg: #f2f2f7; --surface: #fff; --surface2: #f2f2f7; --text: #1c1c1e; --muted: #8e8e93; --border: #c6c6c8; }
+    }
   </style>
 </head>
 <body>
-  <div class="app-header">
+
+<div class="app-header">
+  <div>
     <div class="app-title">株式ウォッチリスト</div>
     <div class="app-sub" id="lastUpdated">未更新</div>
   </div>
+  <button class="btn btn-primary" id="updateAllBtn" onclick="updateAll()">↻ 全更新</button>
+</div>
 
-  <div class="toolbar">
-    <button class="btn btn-primary" id="updateAllBtn" onclick="updateAll()">↻ 全銘柄更新</button>
-    <button class="btn btn-secondary" onclick="toggleSettings()">⚙ 設定</button>
+<!-- Slot tabs -->
+<div class="tabs-wrap">
+  <div class="tabs-grid" id="tabsGrid"></div>
+</div>
+
+<!-- Selector panel (shown when a tab is active) -->
+<div class="selector-panel" id="selectorPanel" style="display:none">
+  <div class="selector-title" id="selectorTitle">スロット X の銘柄を選択</div>
+  <div class="search-row">
+    <input class="search-input" id="searchInput" type="text"
+      placeholder="銘柄名またはコード（例: トヨタ / 7203）"
+      oninput="onSearchInput(this.value)" autocomplete="off">
   </div>
-
-  <div id="settingsPanel" style="display:none" class="settings-panel">
-    <div class="settings-title">ウォッチリスト（4桁銘柄コード）</div>
-    <div class="ticker-grid" id="tickerGrid"></div>
-    <button class="btn btn-primary btn-sm" onclick="saveAndApply()">保存して適用</button>
+  <div class="search-results" id="searchResults">
+    <div class="search-empty">銘柄名またはコードを入力してください</div>
   </div>
-
-  <!-- Search overlay -->
-  <div class="search-overlay" id="searchOverlay" style="display:none" onclick="handleOverlayClick(event)">
-    <div class="search-modal">
-      <div class="search-modal-hdr">
-        <input class="search-input" id="searchInput" type="text"
-          placeholder="銘柄名で検索（例：トヨタ）"
-          oninput="doSearch(this.value)" autocomplete="off">
-        <button class="btn btn-secondary btn-sm" onclick="closeSearch()">✕</button>
-      </div>
-      <div id="searchResults"><div class="search-empty">銘柄名を入力してください</div></div>
-    </div>
+  <div class="selector-footer">
+    <button class="btn btn-primary btn-sm" id="confirmBtn" onclick="confirmSelection()" disabled>この銘柄を設定 ✓</button>
+    <button class="btn btn-secondary btn-sm" onclick="closeSelector()">キャンセル</button>
+    <button class="btn btn-danger btn-sm" onclick="clearSlot()" id="clearBtn">削除</button>
   </div>
+</div>
 
-  <div class="cards-container" id="cardsContainer"></div>
+<div class="cards-container" id="cardsContainer"></div>
 
-  <div class="note">
-    スコアはウォッチリスト内での相対評価（スイング：MA乖離・RR）と絶対評価（デイトレ・RSI・%B・MACD）の混合です。<br>
-    損切り・利確はデイトレATRベース（1ATR損切・2ATR利確）。<br>
-    データはYahoo Financeより取得（CORS proxy経由）。
-  </div>
+<div class="note">
+  スコアはNEW配点（トレンド20絶対・RSI35・%B20・RR15・MACD10）。<br>
+  スイングスコアはウォッチリスト内相対評価。ルール2: 前日比±3%超は除外。<br>
+  データはYahoo Finance・kabutan.jpより取得。
+</div>
 
 <script>
 'use strict';
@@ -245,38 +192,46 @@
 // ─────────────────────────────────────────────
 // Config
 // ─────────────────────────────────────────────
-const STORAGE_KEY   = 'watchlist_v2';
+const STORAGE_KEY = 'watchlist_v3';
 const DEFAULT_TICKERS = ['7203','6758','9984','8306','6501','9432','4502','7011','6861','8035'];
-const CORS_PROXY    = 'https://corsproxy.io/?url=';
-const YF_CHART_BASE = 'https://query2.finance.yahoo.com/v8/finance/chart/';
-const ALLORIGINS    = 'https://api.allorigins.win/get?url=';
+const ALLORIGINS_RAW = 'https://api.allorigins.win/raw?url=';
+const YF_CHART_BASE  = 'https://query2.finance.yahoo.com/v8/finance/chart/';
+const YF_SEARCH_BASE = 'https://query1.finance.yahoo.com/v1/finance/search';
 
-let tickers = [...DEFAULT_TICKERS];
-let stockResults = {};   // code -> { raw, swingScoreBase, shinyo, shinyoLoading, error, loading }
-let settingsOpen = false;
+// ─────────────────────────────────────────────
+// N225 stock name map (code → English name)
+// ─────────────────────────────────────────────
+const N225_NAMES = {"1332":"NISSUI CORP","1333":"UMIOS CORP","1605":"INPEX CORP","1721":"COMSYS HOLDINGS","1801":"TAISEI CORP","1802":"OBAYASHI CORP","1803":"SHIMIZU CORP","1808":"HASEKO CORP","1812":"KAJIMA CORP","1925":"DAIWA HOUSE","1928":"SEKISUI HOUSE","1963":"JGC HOLDINGS","2002":"NISSHIN SEIFUN","2269":"MEIJI HOLDINGS","2282":"NH FOODS","2413":"M3 INC","2432":"DENA","2501":"SAPPORO HOLDINGS","2502":"ASAHI GROUP","2503":"KIRIN HOLDINGS","2531":"TAKARA HOLDINGS","2579":"COCA-COLA BOTTLERS JP","2587":"SUNTORY BEV & FOOD","2593":"ITO EN","2695":"KURA SUSHI","2702":"MCDONALD'S JP","2801":"KIKKOMAN","2802":"AJINOMOTO","2871":"NICHIREI","2914":"JAPAN TOBACCO","3086":"J.FRONT RETAILING","3099":"ISETAN MITSUKOSHI","3105":"NISSHINBO","3289":"TOKYU FUDOSAN","3382":"SEVEN & I HOLDINGS","3401":"TEIJIN","3402":"TORAY INDUSTRIES","3405":"KURARAY","3407":"ASAHI KASEI","3436":"SUMCO","3659":"NEXON","3861":"OJI HOLDINGS","3863":"NIPPON PAPER IND","3941":"RENGO","4004":"RESONAC HOLDINGS","4005":"SUMITOMO CHEMICAL","4021":"NISSAN CHEMICAL","4042":"TOSOH","4043":"TOKUYAMA","4061":"DENKA","4063":"SHIN-ETSU CHEMICAL","4151":"KYOWA KIRIN","4183":"MITSUI CHEMICALS","4188":"MITSUBISHI CHEMICAL","4208":"UBE CORP","4324":"DENTSU GROUP","4452":"KAO","4502":"TAKEDA PHARMACEUTICAL","4503":"ASTELLAS PHARMA","4506":"SUMITOMO PHARMA","4507":"SHIONOGI","4519":"CHUGAI PHARMACEUTICAL","4523":"EISAI","4543":"TERUMO","4568":"DAIICHI SANKYO","4578":"OTSUKA HOLDINGS","4631":"DIC CORP","4642":"ORIGINAL ENGINEERING","4689":"LY CORP","4704":"TREND MICRO","4751":"CYBERAGENT","4755":"RAKUTEN GROUP","4901":"FUJIFILM HOLDINGS","4902":"KONICA MINOLTA","4911":"SHISEIDO","5020":"ENEOS HOLDINGS","5101":"YOKOHAMA RUBBER","5105":"TOYO TIRE","5108":"BRIDGESTONE","5110":"SUMITOMO RUBBER","5201":"AGC","5202":"NIPPON SHEET GLASS","5214":"NIPPON ELECTRIC GLASS","5232":"SUMITOMO OSAKA CEMENT","5233":"TAIHEIYO CEMENT","5301":"TOKAI CARBON","5332":"TOTO","5333":"NGK INSULATORS","5401":"NIPPON STEEL","5406":"KOBE STEEL","5411":"JFE HOLDINGS","5423":"TOKYO STEEL MFG","5631":"JAPAN STEEL WORKS","5703":"NIPPON LIGHT METAL","5706":"MITSUI KINZOKU","5707":"TOHO ZINC","5711":"MITSUBISHI MATERIALS","5713":"SUMITOMO METAL MINING","5714":"DOWA HOLDINGS","5715":"FURUKAWA","5726":"OSAKA TITANIUM TECH","5727":"TOHO TITANIUM","5801":"FURUKAWA ELECTRIC","5802":"SUMITOMO ELECTRIC","5803":"FUJIKURA","5901":"TOYO SEIKAN GROUP","6098":"RECRUIT HOLDINGS","6103":"OKUMA","6113":"AMADA","6146":"DISCO","6178":"JAPAN POST HOLDINGS","6273":"SMC","6301":"KOMATSU","6302":"SUMITOMO HEAVY IND","6305":"HITACHI CONST MACH","6326":"KUBOTA","6361":"EBARA","6367":"DAIKIN INDUSTRIES","6368":"ORGANO","6369":"TOYO KANETSU","6370":"KURITA WATER IND","6471":"NSK","6472":"NTN","6473":"JTEKT","6501":"HITACHI","6503":"MITSUBISHI ELECTRIC","6504":"FUJI ELECTRIC","6506":"YASKAWA ELECTRIC","6508":"MEIDENSHA","6586":"MAKITA","6594":"NIDEC","6645":"OMRON","6647":"MORIO DENKI","6674":"GS YUASA","6701":"NEC","6702":"FUJITSU","6703":"OKI ELECTRIC","6706":"DKK","6724":"SEIKO EPSON","6752":"PANASONIC HOLDINGS","6753":"SHARP","6758":"SONY GROUP","6762":"TDK","6770":"ALPS ALPINE","6841":"YOKOGAWA ELECTRIC","6857":"ADVANTEST","6861":"KEYENCE","6902":"DENSO","6952":"CASIO COMPUTER","6954":"FANUC","6971":"KYOCERA","6976":"TAIYO YUDEN","6981":"MURATA MANUFACTURING","6988":"NITTO DENKO","7003":"MITSUI E&S","7004":"KANADEVIA","7011":"MITSUBISHI HEAVY IND","7012":"KAWASAKI HEAVY IND","7013":"IHI","7182":"JAPAN POST BANK","7186":"YOKOHAMA FINANCIAL","7201":"NISSAN MOTOR","7202":"ISUZU MOTORS","7203":"TOYOTA MOTOR","7205":"HINO MOTORS","7211":"MITSUBISHI MOTORS","7261":"MAZDA MOTOR","7267":"HONDA MOTOR","7269":"SUZUKI MOTOR","7270":"SUBARU","7272":"YAMAHA MOTOR","7731":"NIKON","7733":"OLYMPUS","7735":"SCREEN HOLDINGS","7741":"HOYA","7751":"CANON","7752":"RICOH","7762":"CITIZEN WATCH","7832":"BANDAI NAMCO","7911":"TOPPAN HOLDINGS","7912":"DAI NIPPON PRINTING","7974":"NINTENDO","8001":"ITOCHU","8002":"MARUBENI","8015":"TOYOTA TSUSHO","8031":"MITSUI & CO","8035":"TOKYO ELECTRON","8053":"SUMITOMO CORP","8058":"MITSUBISHI CORP","8233":"TAKASHIMAYA","8252":"MARUI GROUP","8267":"AEON","8304":"AOZORA BANK","8306":"MITSUBISHI UFJ FG","8308":"RESONA HOLDINGS","8309":"SMTG","8316":"SMFG","8411":"MIZUHO FINANCIAL","8591":"ORIX","8601":"DAIWA SECURITIES","8604":"NOMURA HOLDINGS","8630":"SOMPO HOLDINGS","8697":"JAPAN EXCHANGE GROUP","8725":"MS&AD INSURANCE","8750":"DAI-ICHI LIFE","8766":"TOKIO MARINE","8795":"T&D HOLDINGS","9001":"TOBU RAILWAY","9005":"TOKYU","9007":"ODAKYU ELECTRIC","9008":"KEIO","9009":"KEISEI ELECTRIC","9020":"JR EAST","9021":"JR WEST","9022":"JR CENTRAL","9064":"YAMATO HOLDINGS","9101":"NYK LINE","9104":"MOL","9107":"K LINE","9202":"ANA HOLDINGS","9301":"MITSUBISHI LOGISTICS","9412":"SKY PERFECT JSAT","9432":"NTT","9433":"KDDI","9434":"SOFTBANK CORP","9501":"TEPCO","9502":"CHUBU ELECTRIC","9503":"KANSAI ELECTRIC","9531":"TOKYO GAS","9532":"OSAKA GAS","9602":"TOHO","9616":"KYORITSU MAINTENANCE","9735":"SECOM","9766":"KONAMI GROUP","9983":"FAST RETAILING","9984":"SOFTBANK GROUP"};
+const N225_CODES = Object.keys(N225_NAMES);
+
+// ─────────────────────────────────────────────
+// State
+// ─────────────────────────────────────────────
+let tickers      = [...DEFAULT_TICKERS];
+let stockResults = {};   // code → { raw, shinyo, shinyoLoading, error, loading }
+let activeTab    = -1;   // currently open tab index (-1 = none)
+let pendingCode  = null; // code selected in search but not yet confirmed
 let isUpdating   = false;
 
 // ─────────────────────────────────────────────
 // Technical Indicators
 // ─────────────────────────────────────────────
-
 function calcRSI(closes, period = 14) {
   const n = closes.length;
   if (n < period + 2) return 50;
-  let avgGain = 0, avgLoss = 0;
+  let ag = 0, al = 0;
   for (let i = 1; i <= period; i++) {
     const d = closes[i] - closes[i - 1];
-    if (d > 0) avgGain += d; else avgLoss -= d;
+    if (d > 0) ag += d; else al -= d;
   }
-  avgGain /= period;
-  avgLoss /= period;
+  ag /= period; al /= period;
   for (let i = period + 1; i < n; i++) {
     const d = closes[i] - closes[i - 1];
-    avgGain = (avgGain * (period - 1) + Math.max(d, 0)) / period;
-    avgLoss = (avgLoss * (period - 1) + Math.max(-d, 0)) / period;
+    ag = (ag * (period - 1) + Math.max(d, 0)) / period;
+    al = (al * (period - 1) + Math.max(-d, 0)) / period;
   }
-  if (avgLoss === 0) return 100;
-  return 100 - 100 / (1 + avgGain / avgLoss);
+  if (al === 0) return 100;
+  return 100 - 100 / (1 + ag / al);
 }
 
 function smaLast(arr, period) {
@@ -289,28 +244,20 @@ function calcATR(highs, lows, closes, period = 14) {
   if (n < period + 1) return 0;
   const trs = [];
   for (let i = 1; i < n; i++) {
-    trs.push(Math.max(
-      highs[i] - lows[i],
-      Math.abs(highs[i] - closes[i - 1]),
-      Math.abs(lows[i]  - closes[i - 1])
-    ));
+    trs.push(Math.max(highs[i] - lows[i], Math.abs(highs[i] - closes[i-1]), Math.abs(lows[i] - closes[i-1])));
   }
   let atr = trs.slice(0, period).reduce((a, b) => a + b, 0) / period;
-  for (let i = period; i < trs.length; i++) {
-    atr = (atr * (period - 1) + trs[i]) / period;
-  }
+  for (let i = period; i < trs.length; i++) atr = (atr * (period - 1) + trs[i]) / period;
   return atr;
 }
 
 function calcBBPctB(closes, period = 20, nStd = 2) {
   if (closes.length < period) return null;
-  const sl  = closes.slice(-period);
+  const sl = closes.slice(-period);
   const mean = sl.reduce((a, b) => a + b, 0) / period;
-  const std  = Math.sqrt(sl.reduce((a, b) => a + (b - mean) ** 2, 0) / period);
+  const std = Math.sqrt(sl.reduce((a, b) => a + (b - mean) ** 2, 0) / period);
   if (std === 0) return null;
-  const upper = mean + nStd * std;
-  const lower = mean - nStd * std;
-  return (closes[closes.length - 1] - lower) / (upper - lower);
+  return (closes[closes.length - 1] - (mean - nStd * std)) / (2 * nStd * std);
 }
 
 function calcEMA(arr, period) {
@@ -318,33 +265,28 @@ function calcEMA(arr, period) {
   const k = 2 / (period + 1);
   let ema = arr.slice(0, period).reduce((a, b) => a + b, 0) / period;
   const out = [ema];
-  for (let i = period; i < arr.length; i++) {
-    ema = arr[i] * k + ema * (1 - k);
-    out.push(ema);
-  }
-  return out; // length = arr.length - period + 1
+  for (let i = period; i < arr.length; i++) { ema = arr[i] * k + ema * (1 - k); out.push(ema); }
+  return out;
 }
 
 function calcMACDLines(closes) {
   const n = closes.length;
   if (n < 34) return { macd: [], signal: [] };
-  const ema12 = calcEMA(closes, 12);    // length n-11
-  const ema26 = calcEMA(closes, 26);    // length n-25
-  // ema12[i+14] aligns with ema26[i] (both correspond to closes[i+25])
-  const macdFull = ema26.map((v, i) => ema12[i + 14] - v);   // length n-25
+  const ema12 = calcEMA(closes, 12);
+  const ema26 = calcEMA(closes, 26);
+  const macdFull = ema26.map((v, i) => ema12[i + 14] - v);
   if (macdFull.length < 9) return { macd: macdFull, signal: [] };
-  const sigFull  = calcEMA(macdFull, 9);                      // length n-33
-  return { macd: macdFull.slice(8), signal: sigFull };        // aligned, both length n-33
+  const sigFull = calcEMA(macdFull, 9);
+  return { macd: macdFull.slice(8), signal: sigFull };
 }
 
-function macdCrossScore(macd, signal, direction) {
+function macdCrossScore(macd, signal, dir) {
   const n = Math.min(macd.length, signal.length);
   if (n < 4) return 0;
   for (let i = n - 3; i < n; i++) {
-    const prev = macd[i - 1] - signal[i - 1];
-    const curr = macd[i]     - signal[i];
-    if (direction === '買い' && prev < 0 && curr >= 0) return 10;
-    if (direction === '売り' && prev > 0 && curr <= 0) return 10;
+    const prev = macd[i-1] - signal[i-1], curr = macd[i] - signal[i];
+    if (dir === '買い' && prev < 0 && curr >= 0) return 10;
+    if (dir === '売り' && prev > 0 && curr <= 0) return 10;
   }
   return 0;
 }
@@ -352,35 +294,33 @@ function macdCrossScore(macd, signal, direction) {
 function calcHVN(dates, closes, volumes, curr, bins = 20) {
   const n = closes.length;
   if (n < bins) return { sup: null, res: null };
-  const lastDate = dates[n - 1];
-  const cutoff   = lastDate - 30 * 86400 * 1000;
-  const minP = Math.min(...closes);
-  const maxP = Math.max(...closes);
+  const cutoff = dates[n-1] - 30 * 86400000;
+  const minP = Math.min(...closes), maxP = Math.max(...closes);
   if (maxP === minP) return { sup: null, res: null };
   const binSz = (maxP - minP) / bins;
-  const bVols  = new Float64Array(bins);
+  const bVols = new Float64Array(bins);
   for (let i = 0; i < n; i++) {
     const w = dates[i] >= cutoff ? 2 : 1;
-    const b = Math.min(Math.floor((closes[i] - minP) / binSz), bins - 1);
-    bVols[b] += volumes[i] * w;
+    bVols[Math.min(Math.floor((closes[i] - minP) / binSz), bins - 1)] += volumes[i] * w;
   }
-  const top5 = Array.from(bVols)
-    .map((v, i) => ({ v, c: minP + (i + 0.5) * binSz }))
-    .sort((a, b) => b.v - a.v)
-    .slice(0, 5)
-    .map(x => x.c)
-    .sort((a, b) => a - b);
-  const supArr = top5.filter(p => p < curr);
-  const resArr = top5.filter(p => p > curr);
+  const top5 = Array.from(bVols).map((v, i) => ({ v, c: minP + (i + 0.5) * binSz }))
+    .sort((a, b) => b.v - a.v).slice(0, 5).map(x => x.c).sort((a, b) => a - b);
   return {
-    sup: supArr.length ? Math.max(...supArr) : null,
-    res: resArr.length ? Math.min(...resArr) : null
+    sup: Math.max(...top5.filter(p => p < curr), -Infinity),
+    res: Math.min(...top5.filter(p => p > curr), Infinity)
   };
 }
 
 // ─────────────────────────────────────────────
-// Scoring
+// Scoring (NEW weights: T20絶対・RSI35・%B20・RR15・MACD10)
 // ─────────────────────────────────────────────
+function rsiScore(rsi) {
+  if (rsi >= 40 && rsi <= 60) return { buy: 35, sell: 35 };
+  if (rsi >= 30 && rsi <  40) return { buy: 28, sell: 14 };
+  if (rsi >  60 && rsi <= 70) return { buy: 14, sell: 28 };
+  if (rsi < 30)               return { buy: 35, sell:  0 };
+  return { buy: 0, sell: 35 };  // rsi > 70
+}
 
 function rankScore(values, higherIsBetter, maxPts) {
   const n = values.length;
@@ -395,145 +335,93 @@ function rankScore(values, higherIsBetter, maxPts) {
     for (let k = i; k < j; k++) ranks[sorted[k].i] = avg;
     i = j;
   }
-  return ranks.map(r =>
-    higherIsBetter ? (r - 1) / (n - 1) * maxPts : (n - r) / (n - 1) * maxPts
-  );
+  return ranks.map(r => higherIsBetter ? (r-1)/(n-1)*maxPts : (n-r)/(n-1)*maxPts);
 }
 
-function rsiScore(rsi) {
-  // NEW配点: RSI35pt max（souba.pyと同一）
-  if      (rsi >= 40 && rsi <= 60) return { buy: 35, sell: 35 };
-  else if (rsi >= 30 && rsi <  40) return { buy: 28, sell: 14 };
-  else if (rsi >  60 && rsi <= 70) return { buy: 14, sell: 28 };
-  else if (rsi <  30)              return { buy: 35, sell:  0 };
-  else                             return { buy:  0, sell: 35 }; // > 70
-}
-
-/**
- * Compute raw values (no swing score yet — that needs cross-stock ranking).
- */
 function computeRaw(code, name, dates, highs, lows, closes, volumes) {
   const n = closes.length;
   if (n < 20) return null;
-
-  const curr      = closes[n - 1];
-  const prev      = closes[n - 2];
+  const curr = closes[n-1], prev = closes[n-2];
   const changePct = prev ? (curr - prev) / prev * 100 : 0;
-
-  const rsi       = calcRSI(closes);
-  const ma25      = smaLast(closes, 25);
-  const ma75      = smaLast(closes, 75);
-  const maDiv     = (ma25 && ma75 && ma75 !== 0) ? (ma25 - ma75) / ma75 * 100 : 0;
-  const trend     = maDiv > 0 ? '上昇' : '下降';
-  const atr       = calcATR(highs, lows, closes);
-
-  // Last 20 bars
-  const rH = highs.slice(-20),   rL = lows.slice(-20),
-        rC = closes.slice(-20),  rV = volumes.slice(-20);
-  const atrPct   = curr > 0 ? atr / curr * 100 : 0;
+  const rsi = calcRSI(closes);
+  const ma25 = smaLast(closes, 25), ma75 = smaLast(closes, 75);
+  const maDiv = (ma25 && ma75 && ma75 !== 0) ? (ma25 - ma75) / ma75 * 100 : 0;
+  const trend = maDiv > 0 ? '上昇' : '下降';
+  const atr = calcATR(highs, lows, closes);
+  const rH = highs.slice(-20), rL = lows.slice(-20), rC = closes.slice(-20), rV = volumes.slice(-20);
+  const atrPct = curr > 0 ? atr / curr * 100 : 0;
   const avgRange = rC.reduce((s, c, i) => s + (rH[i] - rL[i]) / c * 100, 0) / 20;
-  const volMean  = rV.reduce((a, b) => a + b, 0) / 20;
-  const volStd   = Math.sqrt(rV.reduce((a, b) => a + (b - volMean) ** 2, 0) / 20);
-  const volCv    = volStd / (volMean + 1e-10);
+  const volMean = rV.reduce((a, b) => a + b, 0) / 20;
+  const volStd = Math.sqrt(rV.reduce((a, b) => a + (b - volMean) ** 2, 0) / 20);
   const tradeVal = volMean * curr / 1e8;
-  const priceS   = (curr >= 500 && curr <= 15000) ? 1.0 : 0.3;
-
+  const priceS = (curr >= 500 && curr <= 15000) ? 1.0 : 0.3;
   const daytradeScore = round1(
-    Math.min(atrPct / 5 * 30, 30) +
-    Math.min(avgRange / 5 * 25, 25) +
-    Math.min(tradeVal / 500 * 25, 25) +
-    Math.max(10 - volCv * 5, 0) +
+    Math.min(atrPct / 5 * 30, 30) + Math.min(avgRange / 5 * 25, 25) +
+    Math.min(tradeVal / 500 * 25, 25) + Math.max(10 - (volStd/(volMean+1e-10)) * 5, 0) +
     priceS * 10
   );
-
-  // Daytrade direction, SL/TP
   const dtDir = changePct >= 0 ? '買い' : '売り';
-  const dtSup = dtDir === '買い' ? curr - atr : curr + atr;
-  const dtRes = dtDir === '買い' ? curr + 2 * atr : curr - 2 * atr;
-
-  // HVN
   const hvn = calcHVN(dates, closes, volumes, curr);
+  const supBuy = isFinite(hvn.sup) && hvn.sup !== -Infinity ? hvn.sup : null;
+  const resBuy = isFinite(hvn.res) && hvn.res !== Infinity  ? hvn.res : null;
   let rrBuy = 0, rrSell = 0;
-  if (hvn.sup !== null && hvn.res !== null) {
-    if (curr !== hvn.sup) rrBuy  = Math.abs(hvn.res - curr) / Math.abs(curr - hvn.sup);
-    if (curr !== hvn.res) rrSell = Math.abs(curr - hvn.sup) / Math.abs(hvn.res - curr);
+  if (supBuy !== null && resBuy !== null && curr !== supBuy && curr !== resBuy) {
+    rrBuy  = Math.abs(resBuy - curr) / Math.abs(curr - supBuy);
+    rrSell = Math.abs(curr - supBuy) / Math.abs(resBuy - curr);
   }
-
-  const pctB  = calcBBPctB(closes);
+  const pctB = calcBBPctB(closes);
   const rsiSc = rsiScore(rsi);
-
   return {
-    code, name, curr, changePct, rsi, trend, maDiv,
-    dtDir, dtSup, dtRes,
-    daytradeScore,
-    rrBuyRaw: rrBuy, rrSellRaw: rrSell,
-    buyRsiScore:  rsiSc.buy,
-    sellRsiScore: rsiSc.sell,
-    supBuy: hvn.sup, resBuy: hvn.res,
-    pctB,
+    code, name, curr, changePct, rsi, trend, maDiv, atr,
+    dtDir, dtSup: dtDir === '買い' ? curr - atr : curr + atr,
+    dtRes: dtDir === '買い' ? curr + 2*atr : curr - 2*atr,
+    daytradeScore, rrBuyRaw: rrBuy, rrSellRaw: rrSell,
+    buyRsiScore: rsiSc.buy, sellRsiScore: rsiSc.sell,
+    supBuy, resBuy, pctB,
     _closes: closes, _highs: highs, _lows: lows, _volumes: volumes, _dates: dates
   };
 }
 
-/**
- * Compute swing scores via relative ranking across all raws.
- * Sets r.swingDir, r.swingScoreBase, r.swingSup, r.swingRes.
- */
 function computeSwingScores(raws) {
-  // ルール2: 前日比±3%超は急騰・急落銘柄として除外（souba.pyと同一）
+  // ルール2: 前日比±3%超の銘柄をスイング選出から除外
   const eligible = raws.filter(r => Math.abs(r.changePct) <= 3.0);
-  const excluded = raws.filter(r => Math.abs(r.changePct) >  3.0);
+  const excluded  = raws.filter(r => Math.abs(r.changePct) >  3.0);
 
-  // 除外銘柄はスイングスコア0・方向は前日比で仮設定
   for (const r of excluded) {
-    r.swingDir       = r.changePct >= 0 ? '買い' : '売り';
+    r.swingDir = r.changePct >= 0 ? '買い' : '売り';
     r.swingScoreBase = 0;
-    r.swingSup       = r.supBuy;
-    r.swingRes       = r.resBuy;
-    r.swingExcluded  = true;
+    r.swingSup = r.supBuy; r.swingRes = r.resBuy;
+    r.swingExcluded = true;
   }
 
   const n = eligible.length;
   if (n === 0) return;
 
-  const rrBuys  = eligible.map(r => r.rrBuyRaw);
-  const rrSells = eligible.map(r => r.rrSellRaw);
-
-  // NEW配点: トレンド20pt絶対評価（MA25>MA75なら買い20、売り0）
-  const buyRR  = rankScore(rrBuys,  true, 15);
-  const sellRR = rankScore(rrSells, true, 15);
+  const buyRR  = rankScore(eligible.map(r => r.rrBuyRaw),  true, 15);
+  const sellRR = rankScore(eligible.map(r => r.rrSellRaw), true, 15);
 
   for (let i = 0; i < n; i++) {
-    const r    = eligible[i];
-    // 絶対トレンド評価
+    const r = eligible[i];
     const buyTrendSc  = r.maDiv > 0 ? 20 : 0;
     const sellTrendSc = r.maDiv > 0 ?  0 : 20;
     const pctB = r.pctB;
-    // NEW配点: %B20pt
     const buyBB  = pctB !== null ? Math.max(0, round1((1 - pctB) * 20)) : 0;
     const sellBB = pctB !== null ? Math.max(0, round1(pctB * 20))        : 0;
-
     const buyTmp  = buyTrendSc  + r.buyRsiScore  + buyRR[i]  + buyBB;
     const sellTmp = sellTrendSc + r.sellRsiScore + sellRR[i] + sellBB;
     const tentDir = buyTmp >= sellTmp ? '買い' : '売り';
-
     const { macd, signal } = calcMACDLines(r._closes);
     const macdPts = macdCrossScore(macd, signal, tentDir);
-
     const buyScore  = buyTmp  + (tentDir === '買い' ? macdPts : 0);
     const sellScore = sellTmp + (tentDir === '売り' ? macdPts : 0);
-
     if (buyScore >= sellScore) {
-      r.swingDir       = '買い';
-      r.swingScoreBase = round1(buyScore);
-      r.swingSup       = r.supBuy;
-      r.swingRes       = r.resBuy;
+      r.swingDir = '買い'; r.swingScoreBase = round1(buyScore);
+      r.swingSup = r.supBuy; r.swingRes = r.resBuy;
     } else {
-      r.swingDir       = '売り';
-      r.swingScoreBase = round1(sellScore);
-      r.swingSup       = r.resBuy;   // for short: res becomes SL
-      r.swingRes       = r.supBuy;   // for short: sup becomes TP
+      r.swingDir = '売り'; r.swingScoreBase = round1(sellScore);
+      r.swingSup = r.resBuy; r.swingRes = r.supBuy;
     }
+    r.swingExcluded = false;
   }
 }
 
@@ -549,155 +437,102 @@ function getFinalSwingScore(raw, shinyo) {
 // ─────────────────────────────────────────────
 // Data Fetching
 // ─────────────────────────────────────────────
-
 async function fetchYFChart(code) {
   const url     = `${YF_CHART_BASE}${code}.T?interval=1d&range=6mo`;
-  const proxied = CORS_PROXY + encodeURIComponent(url);
-  const res = await fetch(proxied);
+  const proxied = ALLORIGINS_RAW + encodeURIComponent(url);
+  const res = await fetch(proxied, { signal: AbortSignal.timeout(15000) });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const json   = await res.json();
   const result = json?.chart?.result?.[0];
   if (!result) throw new Error('データなし');
-
   const meta = result.meta;
   const name = meta.shortName || meta.longName || code;
-  const ts   = result.timestamp;
-  const q    = result.indicators.quote[0];
-
-  // Filter nulls
+  const ts = result.timestamp, q = result.indicators.quote[0];
   const dates = [], highs = [], lows = [], closes = [], volumes = [];
   for (let i = 0; i < ts.length; i++) {
     if (q.close[i] != null && q.high[i] != null && q.low[i] != null && q.volume[i] != null) {
-      dates.push(ts[i] * 1000);
-      highs.push(q.high[i]);
-      lows.push(q.low[i]);
-      closes.push(q.close[i]);
-      volumes.push(q.volume[i]);
+      dates.push(ts[i] * 1000); highs.push(q.high[i]); lows.push(q.low[i]);
+      closes.push(q.close[i]); volumes.push(q.volume[i]);
     }
   }
   if (closes.length < 20) throw new Error('データ不足');
   return { name, dates, highs, lows, closes, volumes };
 }
 
-function _parseShinyoFromHtml(html) {
-  const doc = new DOMParser().parseFromString(html, 'text/html');
-
-  // Strategy 1: dt/dd pairs
-  for (const dt of doc.querySelectorAll('dt')) {
-    if (dt.textContent.includes('信用倍率')) {
-      const dd = dt.nextElementSibling;
-      if (dd) {
-        const m = dd.textContent.replace(/,/g, '').match(/[\d.]+/);
-        if (m) return parseFloat(m[0]);
-      }
-    }
-  }
-
-  // Strategy 2: th/td pairs
-  for (const th of doc.querySelectorAll('th')) {
-    if (th.textContent.includes('信用倍率')) {
-      const td = th.nextElementSibling;
-      if (td) {
-        const m = td.textContent.replace(/,/g, '').match(/[\d.]+/);
-        if (m) return parseFloat(m[0]);
-      }
-    }
-  }
-
-  // Strategy 3: regex on raw HTML
-  const re = /信用倍率[^0-9]{0,40}?([\d]{1,5}\.[\d]{1,2})/;
-  const mm = html.replace(/,/g, '').match(re);
-  if (mm) return parseFloat(mm[1]);
-
-  return null;
-}
-
 async function fetchShinyoBairitu(code) {
-  const url = `https://finance.yahoo.co.jp/quote/${code}`;
-
-  // Try 1: corsproxy.io (returns raw HTML)
+  // Source: kabutan.jp via allorigins.win/raw
+  // Parse: 信用倍率 section → last <td>NUMBER倍 in table
   try {
-    const proxied = CORS_PROXY + encodeURIComponent(url);
-    const ctrl = new AbortController();
-    const tid  = setTimeout(() => ctrl.abort(), 12000);
-    const res  = await fetch(proxied, { signal: ctrl.signal });
-    clearTimeout(tid);
-    if (res.ok) {
-      const html = await res.text();
-      const val  = _parseShinyoFromHtml(html);
-      if (val !== null) return val;
-    }
-  } catch { /* fall through */ }
-
-  // Try 2: allorigins.win fallback (JSON-wrapped)
-  try {
-    const proxied = ALLORIGINS + encodeURIComponent(url);
-    const ctrl = new AbortController();
-    const tid  = setTimeout(() => ctrl.abort(), 12000);
-    const res  = await fetch(proxied, { signal: ctrl.signal });
-    clearTimeout(tid);
-    if (res.ok) {
-      const json = await res.json();
-      const html = json.contents;
-      if (html) {
-        const val = _parseShinyoFromHtml(html);
-        if (val !== null) return val;
-      }
-    }
-  } catch { /* silent fail */ }
-
-  return null;
+    const url = `https://kabutan.jp/stock/finance?code=${code}`;
+    const proxied = ALLORIGINS_RAW + encodeURIComponent(url);
+    const res = await fetch(proxied, { signal: AbortSignal.timeout(15000) });
+    if (!res.ok) return null;
+    const html = await res.text();
+    // Find 信用倍率 section header then the table data
+    const idx = html.indexOf('\u4fe1\u7528\u500d\u7387'); // 信用倍率
+    if (idx < 0) return null;
+    const section = html.slice(idx, idx + 1200);
+    const tableEnd = section.indexOf('</table>');
+    const tbl = tableEnd > 0 ? section.slice(0, tableEnd) : section;
+    // Find all <td>NUMBER<span...>倍 patterns
+    const matches = [...tbl.matchAll(/<td>([\d.]+)<span[^>]*>\u500d<\/span>/g)];
+    if (matches.length === 0) return null;
+    // Last match is 信用倍率 (buy/sell ratio)
+    return parseFloat(matches[matches.length - 1][1]);
+  } catch {
+    return null;
+  }
 }
 
 // ─────────────────────────────────────────────
 // Update Logic
 // ─────────────────────────────────────────────
-
 async function updateAll() {
   if (isUpdating) return;
   isUpdating = true;
   const btn = document.getElementById('updateAllBtn');
-  btn.disabled = true;
-  btn.textContent = '更新中...';
+  btn.disabled = true; btn.textContent = '更新中...';
 
   const active = tickers.filter(t => t.trim() !== '');
-  renderLoadingAll(active);
+  // Show loading state on cards
+  for (const code of active) {
+    stockResults[code] = { raw: null, shinyo: null, shinyoLoading: false, error: null, loading: true };
+  }
+  renderCards();
 
-  // 1. Fetch OHLCV in parallel
+  // Fetch OHLCV
   const results = await Promise.all(active.map(async code => {
     try {
       const data = await fetchYFChart(code);
       const raw  = computeRaw(code, data.name, data.dates, data.highs, data.lows, data.closes, data.volumes);
       if (!raw) throw new Error('計算エラー');
       return { code, raw, error: null };
-    } catch (e) {
-      return { code, raw: null, error: e.message };
-    }
+    } catch (e) { return { code, raw: null, error: e.message }; }
   }));
 
-  // 2. Relative swing scoring
+  // Swing scores (relative)
   const goodRaws = results.filter(r => r.raw).map(r => r.raw);
   computeSwingScores(goodRaws);
 
-  // 3. Store
+  // Store & render
   for (const { code, raw, error } of results) {
-    stockResults[code] = {
-      raw, shinyo: null, shinyoLoading: !!raw, error, loading: false
-    };
+    stockResults[code] = { raw, shinyo: null, shinyoLoading: !!raw, error, loading: false };
   }
-
   renderCards();
   updateLastUpdated();
-  btn.disabled = false;
-  btn.textContent = '↻ 全銘柄更新';
+  btn.disabled = false; btn.textContent = '↻ 全更新';
   isUpdating = false;
 
-  // 4. Fetch credit ratios async
+  // Fetch credit ratios async (show "-" on failure, not spinner)
   for (const { code, raw } of results) {
     if (!raw) continue;
     fetchShinyoBairitu(code).then(ratio => {
       if (!stockResults[code]) return;
       stockResults[code].shinyo = ratio;
+      stockResults[code].shinyoLoading = false;
+      renderCardFor(code);
+    }).catch(() => {
+      if (!stockResults[code]) return;
       stockResults[code].shinyoLoading = false;
       renderCardFor(code);
     });
@@ -707,26 +542,22 @@ async function updateAll() {
 async function updateSingle(code) {
   stockResults[code] = { raw: null, shinyo: null, shinyoLoading: false, error: null, loading: true };
   renderCardFor(code);
-
   try {
     const data = await fetchYFChart(code);
     const raw  = computeRaw(code, data.name, data.dates, data.highs, data.lows, data.closes, data.volumes);
     if (!raw) throw new Error('計算エラー');
-
     stockResults[code] = { raw, shinyo: null, shinyoLoading: true, error: null, loading: false };
-
-    // Re-rank among all loaded stocks
-    const allRaws = tickers
-      .filter(t => t.trim() !== '' && stockResults[t]?.raw)
-      .map(t => stockResults[t].raw);
+    const allRaws = tickers.filter(t => t.trim() !== '' && stockResults[t]?.raw).map(t => stockResults[t].raw);
     computeSwingScores(allRaws);
-
     renderCards();
     updateLastUpdated();
-
     fetchShinyoBairitu(code).then(ratio => {
       if (!stockResults[code]) return;
       stockResults[code].shinyo = ratio;
+      stockResults[code].shinyoLoading = false;
+      renderCardFor(code);
+    }).catch(() => {
+      if (!stockResults[code]) return;
       stockResults[code].shinyoLoading = false;
       renderCardFor(code);
     });
@@ -739,22 +570,11 @@ async function updateSingle(code) {
 // ─────────────────────────────────────────────
 // Rendering
 // ─────────────────────────────────────────────
-
-function renderLoadingAll(codes) {
-  document.getElementById('cardsContainer').innerHTML = codes.map(code => `
-    <div class="stock-card" id="card-${code}">
-      <div class="card-hdr">
-        <div><div class="stock-code">${code}</div><div class="stock-name">取得中...</div></div>
-        <div class="spinner"></div>
-      </div>
-    </div>`).join('');
-}
-
 function renderCards() {
   const active = tickers.filter(t => t.trim() !== '');
   if (!active.length) {
     document.getElementById('cardsContainer').innerHTML =
-      '<div class="empty-card">設定から銘柄コードを入力してください</div>';
+      '<div class="empty-card">上のタブから銘柄を設定してください</div>';
     return;
   }
   document.getElementById('cardsContainer').innerHTML = active.map(buildCard).join('');
@@ -770,7 +590,6 @@ function renderCardFor(code) {
 
 function buildCard(code) {
   const e = stockResults[code];
-
   if (!e || e.loading) {
     return `<div class="stock-card" id="card-${code}">
       <div class="card-hdr">
@@ -793,27 +612,28 @@ function buildCard(code) {
       <div class="card-hdr">
         <div class="stock-code">${code}</div>
         <button class="btn btn-secondary btn-sm" onclick="updateSingle('${code}')">↻ 更新</button>
-      </div>
-    </div>`;
+      </div></div>`;
   }
+  const r       = e.raw;
+  const shinyo  = e.shinyo;
+  const swScore = getFinalSwingScore(r, shinyo);
+  const dtScore = r.daytradeScore;
+  const chgSign = r.changePct >= 0 ? '+' : '';
+  const chgCls  = r.changePct >= 0 ? 'pos' : 'neg';
+  const trCls   = r.trend === '上昇' ? 'trend-up' : 'trend-down';
+  const dtDirCls = r.dtDir    === '買い' ? 'dir-buy' : 'dir-sell';
+  const swDirCls = r.swingDir === '買い' ? 'dir-buy' : 'dir-sell';
 
-  const r          = e.raw;
-  const shinyo     = e.shinyo;
-  const swScore    = getFinalSwingScore(r, shinyo);
-  const dtScore    = r.daytradeScore;
-
-  const chgSign    = r.changePct >= 0 ? '+' : '';
-  const chgClass   = r.changePct >= 0 ? 'pos' : 'neg';
-  const trendClass = r.trend === '上昇' ? 'trend-up' : 'trend-down';
-  const dtDirCls   = r.dtDir   === '買い' ? 'dir-buy' : 'dir-sell';
-  const swDirCls   = r.swingDir === '買い' ? 'dir-buy' : 'dir-sell';
-
-  let shinyoHtml;
+  let shinyoStr;
   if (e.shinyoLoading) {
-    shinyoHtml = '<span class="spinner" style="width:13px;height:13px;border-width:1.5px"></span>';
+    shinyoStr = '<span class="spinner" style="width:12px;height:12px;border-width:1.5px"></span>';
   } else {
-    shinyoHtml = shinyo != null ? shinyo.toFixed(2) : 'N/A';
+    shinyoStr = shinyo != null ? shinyo.toFixed(2) : '-';
   }
+
+  const swingNote = r.swingExcluded
+    ? `<div class="score-excluded">⚠ 前日比±3%超・選出除外</div>`
+    : `<div class="score-note">※参考値（メールと異なる場合あり）</div>`;
 
   return `<div class="stock-card" id="card-${code}">
     <div class="card-hdr">
@@ -823,10 +643,9 @@ function buildCard(code) {
       </div>
       <div class="price-block">
         <div class="price-val">¥${fmtP(r.curr)}</div>
-        <div class="price-chg ${chgClass}">${chgSign}${r.changePct.toFixed(2)}%</div>
+        <div class="price-chg ${chgCls}">${chgSign}${r.changePct.toFixed(2)}%</div>
       </div>
     </div>
-
     <div class="scores-row">
       <div class="score-box">
         <div class="score-label">デイトレスコア</div>
@@ -834,9 +653,7 @@ function buildCard(code) {
           <span class="score-num ${sColor(dtScore)}">${dtScore}</span>
           <span class="score-dir ${dtDirCls}">${r.dtDir}</span>
         </div>
-        <div class="score-bar">
-          <div class="score-bar-fill" style="width:${clamp(dtScore)}%;background:${sBg(dtScore)}"></div>
-        </div>
+        <div class="score-bar"><div class="score-bar-fill" style="width:${clamp(dtScore)}%;background:${sBg(dtScore)}"></div></div>
         <div class="score-note">※参考値（メールと異なる場合あり）</div>
       </div>
       <div class="score-box">
@@ -845,15 +662,10 @@ function buildCard(code) {
           <span class="score-num ${sColor(swScore)}">${swScore}</span>
           <span class="score-dir ${swDirCls}">${r.swingDir}</span>
         </div>
-        <div class="score-bar">
-          <div class="score-bar-fill" style="width:${clamp(swScore)}%;background:${sBg(swScore)}"></div>
-        </div>
-        ${r.swingExcluded
-          ? '<div class="score-note" style="color:var(--red)">⚠ 前日比±3%超のため選出除外</div>'
-          : '<div class="score-note">※参考値（メールと異なる場合あり）</div>'}
+        <div class="score-bar"><div class="score-bar-fill" style="width:${clamp(swScore)}%;background:${sBg(swScore)}"></div></div>
+        ${swingNote}
       </div>
     </div>
-
     <div class="sl-tp-row">
       <div class="sl-box">
         <div class="sl-label">損切り（デイ・${r.dtDir}）</div>
@@ -864,7 +676,6 @@ function buildCard(code) {
         <div class="tp-val">¥${fmtP(r.dtRes)}</div>
       </div>
     </div>
-
     <div class="metrics-grid">
       <div class="metric">
         <div class="metric-label">RSI(14)</div>
@@ -872,14 +683,13 @@ function buildCard(code) {
       </div>
       <div class="metric">
         <div class="metric-label">信用倍率</div>
-        <div class="metric-val">${shinyoHtml}</div>
+        <div class="metric-val">${shinyoStr}</div>
       </div>
       <div class="metric">
         <div class="metric-label">トレンド</div>
-        <div class="metric-val ${trendClass}">${r.trend}</div>
+        <div class="metric-val ${trCls}">${r.trend}</div>
       </div>
     </div>
-
     <div class="card-ftr">
       <button class="btn btn-secondary btn-sm" onclick="updateSingle('${code}')">↻ 更新</button>
     </div>
@@ -887,146 +697,203 @@ function buildCard(code) {
 }
 
 function updateLastUpdated() {
-  const now = new Date();
   document.getElementById('lastUpdated').textContent =
-    '最終更新: ' + now.toLocaleString('ja-JP', {
-      month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit'
-    });
+    '最終更新: ' + new Date().toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
 // ─────────────────────────────────────────────
-// Stock Name Search
+// Tab Management
 // ─────────────────────────────────────────────
-
-let _searchTargetIdx = -1;
-let _searchTimer = null;
-
-function openSearch(idx) {
-  _searchTargetIdx = idx;
-  document.getElementById('searchInput').value = '';
-  document.getElementById('searchResults').innerHTML =
-    '<div class="search-empty">銘柄名を入力してください</div>';
-  document.getElementById('searchOverlay').style.display = 'flex';
-  setTimeout(() => document.getElementById('searchInput').focus(), 80);
+function renderTabs() {
+  const grid = document.getElementById('tabsGrid');
+  grid.innerHTML = tickers.map((code, i) => {
+    const name  = code.trim() ? (stockResults[code]?.raw?.name || N225_NAMES[code] || code) : '---';
+    const isSet = code.trim() !== '';
+    const isSel = i === activeTab;
+    return `<button class="tab-btn ${isSet ? '' : 'empty'} ${isSel ? 'active' : ''}"
+        onclick="selectTab(${i})">
+      <span class="tab-num">${i + 1}</span>
+      <span class="tab-name">${isSet ? name : '---'}</span>
+    </button>`;
+  }).join('');
 }
 
-function closeSearch() {
-  document.getElementById('searchOverlay').style.display = 'none';
-  _searchTargetIdx = -1;
-}
-
-function handleOverlayClick(e) {
-  if (e.target === document.getElementById('searchOverlay')) closeSearch();
-}
-
-function doSearch(query) {
-  clearTimeout(_searchTimer);
-  const q = query.trim();
-  if (!q) {
-    document.getElementById('searchResults').innerHTML =
-      '<div class="search-empty">銘柄名を入力してください</div>';
+function selectTab(i) {
+  if (activeTab === i) {
+    // Toggle off
+    activeTab = -1;
+    document.getElementById('selectorPanel').style.display = 'none';
+    renderTabs();
     return;
   }
-  document.getElementById('searchResults').innerHTML =
-    '<div class="search-empty">検索中...</div>';
-  _searchTimer = setTimeout(() => _execSearch(q), 350);
+  activeTab = i;
+  pendingCode = tickers[i].trim() || null;
+  renderTabs();
+  openSelector(i);
 }
 
-async function _execSearch(q) {
+function openSelector(i) {
+  const code = tickers[i].trim();
+  document.getElementById('selectorTitle').textContent = `スロット ${i + 1} の銘柄を選択`;
+  const input = document.getElementById('searchInput');
+  input.value = code || '';
+  pendingCode = code || null;
+  updateConfirmBtn();
+
+  // Show initial search results
+  if (code) {
+    showLocalSearch(code);
+  } else {
+    document.getElementById('searchResults').innerHTML =
+      '<div class="search-empty">銘柄名またはコードを入力してください</div>';
+  }
+
+  document.getElementById('selectorPanel').style.display = 'block';
+  document.getElementById('clearBtn').style.display = code ? '' : 'none';
+  // Scroll to panel
+  document.getElementById('selectorPanel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  setTimeout(() => input.focus(), 100);
+}
+
+function closeSelector() {
+  activeTab = -1;
+  pendingCode = null;
+  document.getElementById('selectorPanel').style.display = 'none';
+  renderTabs();
+}
+
+function clearSlot() {
+  if (activeTab < 0) return;
+  const code = tickers[activeTab];
+  tickers[activeTab] = '';
+  if (code) delete stockResults[code];
+  saveTickers();
+  closeSelector();
+  renderCards();
+}
+
+// ─────────────────────────────────────────────
+// Search
+// ─────────────────────────────────────────────
+let _searchTimer = null;
+
+function onSearchInput(val) {
+  clearTimeout(_searchTimer);
+  pendingCode = null;
+  updateConfirmBtn();
+  const q = val.trim();
+  if (!q) {
+    document.getElementById('searchResults').innerHTML =
+      '<div class="search-empty">銘柄名またはコードを入力してください</div>';
+    return;
+  }
+  // Show local results instantly
+  showLocalSearch(q);
+  // Debounce remote search
+  _searchTimer = setTimeout(() => doRemoteSearch(q), 500);
+}
+
+function showLocalSearch(q) {
+  const ql = q.toLowerCase();
+  const matches = N225_CODES.filter(code => {
+    if (code.includes(q)) return true;
+    const name = (N225_NAMES[code] || '').toLowerCase();
+    return name.includes(ql);
+  }).slice(0, 12);
+
+  if (!matches.length) {
+    document.getElementById('searchResults').innerHTML =
+      '<div class="search-empty">候補なし（リモート検索中...）</div>';
+    return;
+  }
+  renderSearchItems(matches.map(code => ({ code, name: N225_NAMES[code] || code })));
+}
+
+async function doRemoteSearch(q) {
   try {
-    const apiUrl = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(q)}&lang=ja&region=JP&quotesCount=10&newsCount=0`;
-    const proxied = CORS_PROXY + encodeURIComponent(apiUrl);
+    const apiUrl = `${YF_SEARCH_BASE}?q=${encodeURIComponent(q)}&lang=ja&region=JP&quotesCount=10&newsCount=0`;
+    const proxied = ALLORIGINS_RAW + encodeURIComponent(apiUrl);
     const res = await fetch(proxied, { signal: AbortSignal.timeout(8000) });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) return;
     const json = await res.json();
     const quotes = (json.quotes || []).filter(q =>
-      q.exchange === 'TKY' || q.exchange === 'OSA' || (q.symbol && q.symbol.endsWith('.T'))
+      q.symbol && (q.symbol.endsWith('.T') || q.exchange === 'TKY' || q.exchange === 'OSA')
     );
-    if (!quotes.length) {
-      document.getElementById('searchResults').innerHTML =
-        '<div class="search-empty">該当銘柄なし</div>';
-      return;
-    }
-    document.getElementById('searchResults').innerHTML = quotes.slice(0, 8).map(q => {
-      const code = (q.symbol || '').replace('.T', '');
-      const name = q.shortname || q.longname || code;
-      return `<div class="search-result-item" onclick="selectSearchResult('${code}', '${name.replace(/'/g,"\\'")}')">
-        <span class="search-res-name">${name}</span>
-        <span class="search-res-code">${code}</span>
-      </div>`;
-    }).join('');
-  } catch (e) {
-    document.getElementById('searchResults').innerHTML =
-      `<div class="search-empty">取得エラー: ${e.message}</div>`;
+    if (!quotes.length) return;
+    const items = quotes.slice(0, 8).map(q => ({
+      code: q.symbol.replace('.T', ''),
+      name: q.shortname || q.longname || q.symbol.replace('.T', '')
+    }));
+    renderSearchItems(items);
+  } catch {
+    // Keep local results
   }
 }
 
-function selectSearchResult(code, _name) {
-  if (_searchTargetIdx >= 0) {
-    const el = document.getElementById(`ti-${_searchTargetIdx}`);
-    if (el) el.value = code;
+function renderSearchItems(items) {
+  if (!items.length) {
+    document.getElementById('searchResults').innerHTML = '<div class="search-empty">候補なし</div>';
+    return;
   }
-  closeSearch();
+  document.getElementById('searchResults').innerHTML = items.map(({ code, name }) => {
+    const isSel = code === pendingCode;
+    return `<div class="search-item ${isSel ? 'selected' : ''}" onclick="selectSearchItem('${code}', ${JSON.stringify(name)})">
+      <span class="search-item-name">${name}</span>
+      <span class="search-item-code">${code}</span>
+    </div>`;
+  }).join('');
 }
 
-// ─────────────────────────────────────────────
-// Settings
-// ─────────────────────────────────────────────
-
-function toggleSettings() {
-  settingsOpen = !settingsOpen;
-  document.getElementById('settingsPanel').style.display = settingsOpen ? 'block' : 'none';
-}
-
-function renderTickerInputs() {
-  document.getElementById('tickerGrid').innerHTML = tickers.map((code, i) => `
-    <div class="ticker-item-wrap">
-      <label style="font-size:11px;color:var(--muted);text-align:center">${i + 1}</label>
-      <div class="ticker-input-row">
-        <input type="text" class="ticker-input" id="ti-${i}"
-          value="${code}" maxlength="4" inputmode="numeric" placeholder="----">
-        <button class="search-btn" onclick="openSearch(${i})" title="銘柄名検索">🔍</button>
-      </div>
-    </div>`).join('');
-}
-
-function saveAndApply() {
-  tickers = tickers.map((_, i) => {
-    const el = document.getElementById(`ti-${i}`);
-    return el ? el.value.trim().replace(/[^0-9]/g, '') : '';
+function selectSearchItem(code, name) {
+  pendingCode = code;
+  updateConfirmBtn();
+  // Re-render to show selected state
+  const items = document.querySelectorAll('.search-item');
+  items.forEach(el => {
+    const c = el.querySelector('.search-item-code')?.textContent;
+    el.classList.toggle('selected', c === code);
   });
+}
+
+function updateConfirmBtn() {
+  document.getElementById('confirmBtn').disabled = !pendingCode;
+}
+
+function confirmSelection() {
+  if (!pendingCode || activeTab < 0) return;
+  const oldCode = tickers[activeTab];
+  tickers[activeTab] = pendingCode;
+  saveTickers();
+  closeSelector();
+  // Auto-fetch the newly set stock
+  updateSingle(pendingCode).then(() => {
+    // If old code is no longer in the list, clean up
+    if (oldCode && oldCode !== pendingCode && !tickers.includes(oldCode)) {
+      delete stockResults[oldCode];
+    }
+    renderCards();
+  });
+}
+
+// ─────────────────────────────────────────────
+// Persistence
+// ─────────────────────────────────────────────
+function saveTickers() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(tickers));
-  stockResults = {};
-  toggleSettings();
-  renderTickerInputs();
-  updateAll();
 }
 
 // ─────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────
-
 function round1(v) { return Math.round(v * 10) / 10; }
 function clamp(v)  { return Math.max(0, Math.min(100, v)); }
-function fmtP(p)   {
-  if (p == null || isNaN(p)) return '-';
-  return Math.round(p).toLocaleString('ja-JP');
-}
-function sColor(s) {
-  if (s >= 70) return 'high';
-  if (s >= 50) return 'mid';
-  return 'low';
-}
-function sBg(s) {
-  if (s >= 70) return 'var(--green)';
-  if (s >= 50) return 'var(--yellow)';
-  return 'var(--red)';
-}
+function fmtP(p)   { if (p == null || isNaN(p)) return '-'; return Math.round(p).toLocaleString('ja-JP'); }
+function sColor(s) { return s >= 70 ? 'high' : s >= 50 ? 'mid' : 'low'; }
+function sBg(s)    { return s >= 70 ? 'var(--green)' : s >= 50 ? 'var(--yellow)' : 'var(--red)'; }
 
 // ─────────────────────────────────────────────
 // Init
 // ─────────────────────────────────────────────
-
 (function init() {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
@@ -1035,7 +902,7 @@ function sBg(s) {
       if (Array.isArray(p) && p.length === 10) tickers = p;
     }
   } catch {}
-  renderTickerInputs();
+  renderTabs();
   renderCards();
 })();
 </script>
