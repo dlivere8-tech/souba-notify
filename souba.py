@@ -638,6 +638,13 @@ for r in all_results:
 dt_top10    = sorted(all_results, key=lambda x: x['daytrade_score'], reverse=True)[:10]
 # ルール2: 前日比 ±3% 超は急騰・急落銘柄として除外（バックテスト最適閾値）
 swing_valid = [r for r in all_results if r['swing_rr_valid'] and abs(r['change_pct']) <= 3.0]
+
+# 市場環境フィルター：日経MA10/MA25でトレンド判定し逆方向シグナルを除外
+nikkei_market_trend = get_nikkei_trend(fast=10, slow=25)
+if nikkei_market_trend is not None:
+    filtered = [r for r in swing_valid if r['swing_direction'] == nikkei_market_trend]
+    swing_valid = filtered if len(filtered) >= 5 else swing_valid  # 候補が5件未満ならフィルター解除
+
 swing_top10 = sorted(swing_valid, key=lambda x: x['swing_score'], reverse=True)[:10]
 
 dt_dir_map    = {r['code']: r['dt_direction']    for r in dt_top10}
@@ -662,6 +669,17 @@ def get_yf(symbol, is_rate=False):
         return (curr, f"{change:+.3f}", f"{pct:+.2f}%") if is_rate else (curr, f"{change:+,.1f}", f"{pct:+.2f}%")
     except:
         return None, "-", "-"
+
+def get_nikkei_trend(fast=10, slow=25):
+    """日経平均MA10/MA25でトレンド判定。返値: '買い'/'売り'/None"""
+    try:
+        df = yf.Ticker("^N225").history(period="3mo", auto_adjust=False)
+        if df.empty or len(df) < slow:
+            return None
+        closes = df['Close'].values.astype(float)
+        return '買い' if closes[-fast:].mean() >= closes[-slow:].mean() else '売り'
+    except:
+        return None
 
 dow,    dow_c,    dow_p    = get_yf("^DJI")
 sp,     sp_c,     sp_p     = get_yf("^GSPC")
@@ -775,7 +793,7 @@ def build_daytrade_table(results, earnings_flags, mismatch_codes=None):
         "<thead>" + thead + "</thead><tbody>" + tbody + "</tbody></table></div></div>"
     )
 
-def build_swing_table(results, earnings_flags, mismatch_codes=None):
+def build_swing_table(results, earnings_flags, mismatch_codes=None, market_trend=None):
     if mismatch_codes is None: mismatch_codes = set()
     thead = (
         "<tr style='background:#f5f5f5;'>"
@@ -865,12 +883,15 @@ def build_swing_table(results, earnings_flags, mismatch_codes=None):
         "<div style='background:#1a237e;color:#fff;padding:12px 16px;'>"
         "<h2 style='margin:0;font-size:15px;'>今週のスイング推奨</h2>"
         "<p style='margin:4px 0 0;font-size:11px;opacity:0.8;'>トレンド20(絶対)・RSI35・%B20・RR15・MACD10</p>"
-        "</div><div style='overflow-x:auto;'><table style='width:100%;border-collapse:collapse;'>"
+        + (f"<p style='margin:4px 0 0;font-size:11px;opacity:0.9;'>📊 市場環境フィルター: 日経{'↑上昇' if market_trend=='買い' else '↓下降'}トレンド（{'買い' if market_trend=='買い' else '売り'}シグナルのみ）</p>"
+           if market_trend else
+           "<p style='margin:4px 0 0;font-size:11px;opacity:0.7;'>📊 市場環境フィルター: データ取得失敗（フィルターなし）</p>")
+        + "</div><div style='overflow-x:auto;'><table style='width:100%;border-collapse:collapse;'>"
         "<thead>" + thead + "</thead><tbody>" + tbody + "</tbody></table></div></div>"
     )
 
 dt_section    = build_daytrade_table(dt_top10,    earnings_flags, MISMATCH_CODES)
-swing_section = build_swing_table(swing_top10, earnings_flags, MISMATCH_CODES)
+swing_section = build_swing_table(swing_top10, earnings_flags, MISMATCH_CODES, market_trend=nikkei_market_trend)
 
 html = (
     "<html><body style='font-family:sans-serif;background:#f5f5f5;padding:12px;'>"

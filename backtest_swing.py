@@ -59,10 +59,11 @@ UNIVERSE = [
     "9616","9735","9766","9983","9984",
 ]
 
-HOLD_DAYS = 5
-TOP_N     = 10
-TOP_VOL   = 50
-HIST_BARS = 80
+HOLD_DAYS       = 5
+TOP_N           = 10
+TOP_VOL         = 50
+HIST_BARS       = 80
+SL_BUFFER_MULTS = [1.0, 1.1, 1.2, 1.3, 1.5]  # SL距離拡張倍率（1.0=現状）
 
 # ─────────────────────────────────────────────
 # テクニカル指標
@@ -324,9 +325,15 @@ def apply_exclusions(raws, rule2_threshold=3.0):
 # バックテスト本体（本格版）
 # ─────────────────────────────────────────────
 
-def run_backtest(all_data_dict, eval_dates):
+def run_backtest(all_data_dict, eval_dates, sl_buffer_mult=1.0,
+                 nikkei_data=None, use_market_filter=False,
+                 nikkei_fast=25, nikkei_slow=75):
     """
     本格版バックテスト：翌日寄り付きエントリー、TP/SL判定、強制決済
+    sl_buffer_mult:      SL距離の拡張倍率（1.0=そのまま）
+    nikkei_data:         日経平均DataFrameまたはNone
+    use_market_filter:   Trueの場合、日経トレンドと逆方向シグナルを除外
+    nikkei_fast/slow:    トレンド判定に使うMAの期間
     """
     trade_records = []   # 全トレード詳細
     direction_records = []  # 従来の方向的中率用
@@ -369,14 +376,29 @@ def run_backtest(all_data_dict, eval_dates):
         if not candidates:
             continue
 
+        # 市場環境フィルター：日経トレンドと逆方向シグナルを除外
+        if use_market_filter and nikkei_data is not None:
+            nikkei_trend = calc_nikkei_trend(nikkei_data, eval_ts,
+                                             fast=nikkei_fast, slow=nikkei_slow)
+            if nikkei_trend is not None:
+                candidates = [r for r in candidates
+                              if r['swing_direction'] == nikkei_trend]
+            if not candidates:
+                continue
+
         top = sorted(candidates, key=lambda x: x['swing_score'], reverse=True)[:TOP_N]
 
-        for s in top:
+        for rank, s in enumerate(top, 1):
             code     = s['code']
             df_full  = all_data_dict[code]
-            direction = s['swing_direction']
-            tp_level  = s['swing_tp']
-            sl_level  = s['swing_sl']
+            direction    = s['swing_direction']
+            tp_level     = s['swing_tp']
+            sl_level     = s['swing_sl']
+            ma_div       = s['ma_divergence']
+            trend_aligned = (
+                (direction == "買い" and ma_div > 0) or
+                (direction == "売り" and ma_div < 0)
+            )
 
             # 翌営業日以降の棒足を取得
             future_bars = df_full[df_full.index.normalize() > eval_ts]
@@ -387,6 +409,14 @@ def run_backtest(all_data_dict, eval_dates):
             entry_bar   = future_bars.iloc[0]
             entry_price = float(entry_bar['Open'])
 
+            # SLバッファ適用（エントリー後の実SLを拡張）
+            if sl_level is not None and sl_buffer_mult != 1.0:
+                sl_dist = abs(entry_price - sl_level)
+                if direction == "買い":
+                    sl_level = entry_price - sl_dist * sl_buffer_mult
+                else:
+                    sl_level = entry_price + sl_dist * sl_buffer_mult
+
             # 方向的中率用の5日後終値
             if len(future_bars) >= HOLD_DAYS:
                 exit_close = float(future_bars.iloc[HOLD_DAYS - 1]['Close'])
@@ -394,6 +424,23 @@ def run_backtest(all_data_dict, eval_dates):
                 hit_dir = (direction == "買い" and fwd_return > 0) or \
                           (direction == "売り" and fwd_return < 0)
                 direction_records.append(hit_dir)
+
+            # ── OHLC累積スコア計算（TP/SLに関係なく5日分集計）──
+            ohlc_bars = future_bars.head(HOLD_DAYS)
+            daily_ohlc = []
+            for _, bar in ohlc_bars.iterrows():
+                h = float(bar['High'])
+                l = float(bar['Low'])
+                c = float(bar['Close'])
+                if direction == "買い":
+                    score = (h - entry_price) + (l - entry_price) + (c - entry_price)
+                else:
+                    score = (entry_price - h) + (entry_price - l) + (entry_price - c)
+                daily_ohlc.append(score / entry_price * 100)
+            # 足りない日はNaN埋め
+            while len(daily_ohlc) < HOLD_DAYS:
+                daily_ohlc.append(float('nan'))
+            cumulative_ohlc = sum(v for v in daily_ohlc if not np.isnan(v))
 
             if tp_level is None:
                 continue
@@ -450,18 +497,28 @@ def run_backtest(all_data_dict, eval_dates):
             pnl_pct = pnl / entry_price * 100
 
             trade_records.append({
-                'eval_dt':   eval_dt.strftime('%Y-%m-%d'),
-                'code':      code,
-                'direction': direction,
-                'entry':     round(entry_price, 1),
-                'tp':        round(tp_level, 1),
-                'sl':        round(sl_level, 1),
-                'exit':      round(exit_price, 1),
-                'result':    result,
-                'pnl_pct':   round(pnl_pct, 2),
-                'rr_real':   round(rr_real, 2),
-                'mfe_pct':   round(mfe / entry_price * 100, 2),
-                'mae_pct':   round(mae / entry_price * 100, 2),
+                'eval_dt':        eval_dt.strftime('%Y-%m-%d'),
+                'code':           code,
+                'direction':      direction,
+                'entry':          round(entry_price, 1),
+                'tp':             round(tp_level, 1),
+                'sl':             round(sl_level, 1),
+                'exit':           round(exit_price, 1),
+                'result':         result,
+                'pnl_pct':        round(pnl_pct, 2),
+                'rr_real':        round(rr_real, 2),
+                'mfe_pct':        round(mfe / entry_price * 100, 2),
+                'mae_pct':        round(mae / entry_price * 100, 2),
+                'd1_ohlc_pct':    round(daily_ohlc[0], 3) if not np.isnan(daily_ohlc[0]) else '',
+                'd2_ohlc_pct':    round(daily_ohlc[1], 3) if not np.isnan(daily_ohlc[1]) else '',
+                'd3_ohlc_pct':    round(daily_ohlc[2], 3) if not np.isnan(daily_ohlc[2]) else '',
+                'd4_ohlc_pct':    round(daily_ohlc[3], 3) if not np.isnan(daily_ohlc[3]) else '',
+                'd5_ohlc_pct':    round(daily_ohlc[4], 3) if not np.isnan(daily_ohlc[4]) else '',
+                'cumulative_ohlc':  round(cumulative_ohlc, 3),
+                'sl_buffer_mult':   sl_buffer_mult,
+                'ma_divergence':    round(ma_div, 3),
+                'trend_aligned':    trend_aligned,
+                'swing_rank':       rank,
             })
 
     return trade_records, direction_records
@@ -490,23 +547,129 @@ def calc_metrics(trade_records, direction_records):
 
     dir_rate = sum(direction_records) / len(direction_records) * 100 if direction_records else 0.0
 
+    # ── OHLC累積スコア分析 ──
+    def _ohlc_list(records):
+        return [t['cumulative_ohlc'] for t in records if isinstance(t.get('cumulative_ohlc'), float)]
+
+    all_ohlc   = _ohlc_list(trade_records)
+    sl_ohlc    = _ohlc_list(sl_losses)
+    win_ohlc   = _ohlc_list(wins)
+    forc_ohlc  = _ohlc_list(f_losses)
+
+    avg_ohlc_all  = round(np.mean(all_ohlc),  3) if all_ohlc  else 0.0
+    avg_ohlc_sl   = round(np.mean(sl_ohlc),   3) if sl_ohlc   else 0.0
+    avg_ohlc_win  = round(np.mean(win_ohlc),  3) if win_ohlc  else 0.0
+    avg_ohlc_forc = round(np.mean(forc_ohlc), 3) if forc_ohlc else 0.0
+
+    # SL到達のうちcumulative_ohlcがプラスだった件数（SLが早すぎた可能性）
+    sl_ohlc_positive = sum(1 for v in sl_ohlc if v > 0)
+    sl_ohlc_pos_rate = round(sl_ohlc_positive / len(sl_ohlc) * 100, 1) if sl_ohlc else 0.0
+
+    # 日別平均OHLCスコア
+    day_avgs = []
+    for d in range(1, HOLD_DAYS + 1):
+        key = f'd{d}_ohlc_pct'
+        vals = [t[key] for t in trade_records if isinstance(t.get(key), float)]
+        day_avgs.append(round(np.mean(vals), 3) if vals else 0.0)
+
     return {
-        'n':          n,
-        'wins':       len(wins),
-        'tp_wins':    len(tp_wins),
-        'f_wins':     len(f_wins),
-        'losses':     len(losses),
-        'sl_losses':  len(sl_losses),
-        'f_losses':   len(f_losses),
-        'win_rate':   round(win_rate, 1),
-        'pf':         round(pf, 2),
-        'avg_rr':     round(avg_rr, 2),
-        'avg_mfe':    round(avg_mfe, 2),
-        'avg_mae':    round(avg_mae, 2),
-        'avg_pnl':    round(avg_pnl, 2),
-        'dir_rate':   round(dir_rate, 1),
-        'dir_n':      len(direction_records),
+        'n':                  n,
+        'wins':               len(wins),
+        'tp_wins':            len(tp_wins),
+        'f_wins':             len(f_wins),
+        'losses':             len(losses),
+        'sl_losses':          len(sl_losses),
+        'f_losses':           len(f_losses),
+        'win_rate':           round(win_rate, 1),
+        'pf':                 round(pf, 2),
+        'avg_rr':             round(avg_rr, 2),
+        'avg_mfe':            round(avg_mfe, 2),
+        'avg_mae':            round(avg_mae, 2),
+        'avg_pnl':            round(avg_pnl, 2),
+        'dir_rate':           round(dir_rate, 1),
+        'dir_n':              len(direction_records),
+        'avg_ohlc_all':       avg_ohlc_all,
+        'avg_ohlc_win':       avg_ohlc_win,
+        'avg_ohlc_sl':        avg_ohlc_sl,
+        'avg_ohlc_forc_loss': avg_ohlc_forc,
+        'sl_ohlc_pos_rate':   sl_ohlc_pos_rate,
+        'sl_ohlc_positive':   sl_ohlc_positive,
+        'ohlc_day_avgs':      day_avgs,
     }
+
+
+def _group_metrics(trades):
+    """トレードリストから勝率・PF・SL率・平均損益を計算"""
+    n = len(trades)
+    if n == 0:
+        return {'n': 0, 'win_rate': 0.0, 'pf': 0.0, 'sl_rate': 0.0, 'avg_pnl': 0.0}
+    wins   = [t for t in trades if t['result'] in ('win', 'forced_win')]
+    losses = [t for t in trades if t['result'] in ('loss', 'forced_loss')]
+    sl_hits = [t for t in trades if t['result'] == 'loss']
+    gp = sum(t['pnl_pct'] for t in wins)
+    gl = abs(sum(t['pnl_pct'] for t in losses))
+    return {
+        'n':        n,
+        'win_rate': round(len(wins) / n * 100, 1),
+        'pf':       round(gp / gl, 2) if gl > 0 else float('inf'),
+        'sl_rate':  round(len(sl_hits) / n * 100, 1),
+        'avg_pnl':  round(sum(t['pnl_pct'] for t in trades) / n, 2),
+    }
+
+
+def calc_direction_trend_analysis(trade_records):
+    """
+    方向（買い/売り）× トレンド一致/不一致 の4グループ別成績
+    """
+    groups = {
+        '買い×順張り': [],
+        '買い×逆張り': [],
+        '売り×順張り': [],
+        '売り×逆張り': [],
+    }
+    for t in trade_records:
+        d  = t['direction']
+        ta = t.get('trend_aligned', True)
+        if d == "買い":
+            groups['買い×順張り' if ta else '買い×逆張り'].append(t)
+        else:
+            groups['売り×順張り' if ta else '売り×逆張り'].append(t)
+
+    return {k: _group_metrics(v) for k, v in groups.items()}
+
+
+def calc_nikkei_trend(df_nikkei, eval_ts, fast=25, slow=75):
+    """
+    評価日時点の日経平均トレンドを返す
+    fast MA > slow MA → '買い'（上昇トレンド）
+    fast MA < slow MA → '売り'（下降トレンド）
+    """
+    df = df_nikkei[df_nikkei.index.normalize() < eval_ts]
+    if len(df) < slow:
+        return None  # データ不足 → フィルターなし
+    closes = df['Close'].values.astype(float)
+    ma_fast = closes[-fast:].mean()
+    ma_slow = closes[-slow:].mean()
+    return '買い' if ma_fast >= ma_slow else '売り'
+
+
+def calc_monthly_analysis(trade_records):
+    """
+    月別 × 方向（買い/売り）の成績分析
+    """
+    from collections import defaultdict
+    months = sorted(set(t['eval_dt'][:7] for t in trade_records))
+    result = {}
+    for ym in months:
+        month_trades = [t for t in trade_records if t['eval_dt'][:7] == ym]
+        buy_trades   = [t for t in month_trades if t['direction'] == '買い']
+        sell_trades  = [t for t in month_trades if t['direction'] == '売り']
+        result[ym] = {
+            'all':  _group_metrics(month_trades),
+            'buy':  _group_metrics(buy_trades),
+            'sell': _group_metrics(sell_trades),
+        }
+    return result
 
 
 # ─────────────────────────────────────────────
@@ -542,6 +705,24 @@ if __name__ == '__main__':
         time.sleep(0.15)
     print(f"\n取得成功: {len(all_data)}銘柄")
 
+    # ──── 日経平均データ取得 ────
+    print("  日経平均（^N225）取得中...")
+    nikkei_data = None
+    try:
+        df_n = yf.Ticker("^N225").history(
+            start=start_dt.strftime('%Y-%m-%d'),
+            end=(end_dt + timedelta(days=30)).strftime('%Y-%m-%d'),
+            auto_adjust=False
+        )
+        if len(df_n) >= 75:
+            df_n.index = df_n.index.tz_localize(None)
+            nikkei_data = df_n
+            print(f"  ^N225: {len(df_n)}本取得")
+        else:
+            print("  ^N225: データ不足、市場フィルターなしで実行")
+    except Exception as e:
+        print(f"  ^N225: 取得失敗 ({e})、市場フィルターなしで実行")
+
     # ──── 評価日生成（過去4ヶ月・5営業日おき）────
     print("\n[2/3] 評価日生成中...")
     eval_end   = end_dt - timedelta(days=HOLD_DAYS + 5)
@@ -559,56 +740,239 @@ if __name__ == '__main__':
     print(f"  評価期間: {eval_dates[0].strftime('%Y-%m-%d')} ～ {eval_dates[-1].strftime('%Y-%m-%d')}")
     print(f"  評価ポイント数: {len(eval_dates)}")
 
-    # ──── バックテスト実行 ────
-    print("\n[3/3] バックテスト実行中...")
-    trade_records, direction_records = run_backtest(all_data, eval_dates)
+    # ──── バックテスト実行：SLバッファ×市場フィルター ────
+    print(f"\n[3/3] バックテスト実行中...")
+    all_metrics = {}
+    all_trades  = {}
+    base_direction_records = None
 
-    metrics = calc_metrics(trade_records, direction_records)
+    # SLバッファ比較（フィルターなし）
+    for mult in SL_BUFFER_MULTS:
+        print(f"  [フィルターなし] SL×{mult:.1f} 実行中...", end="\r")
+        trades, dir_recs = run_backtest(all_data, eval_dates, sl_buffer_mult=mult)
+        all_metrics[mult] = calc_metrics(trades, dir_recs)
+        all_trades[mult]  = trades
+        if base_direction_records is None:
+            base_direction_records = dir_recs
 
-    # ──── 結果表示 ────
-    print("\n" + "=" * 60)
-    print("【バックテスト結果】")
-    print("=" * 60)
-    print(f"  総トレード数  : {metrics['n']}")
-    print(f"  勝ち計        : {metrics['wins']}  (TP到達:{metrics['tp_wins']} + 強制益:{metrics['f_wins']})")
-    print(f"  負け計        : {metrics['losses']}  (SL到達:{metrics['sl_losses']} + 強制損:{metrics['f_losses']})")
-    print(f"  勝率          : {metrics['win_rate']:.1f}%")
-    print(f"  プロフィットF : {metrics['pf']:.2f}")
-    print(f"  平均RR(実績)  : {metrics['avg_rr']:.2f}")
-    print(f"  平均損益      : {metrics['avg_pnl']:.2f}%")
-    print(f"  平均MFE       : {metrics['avg_mfe']:.2f}%")
-    print(f"  平均MAE       : {metrics['avg_mae']:.2f}%")
-    print(f"  ---")
-    print(f"  方向的中率(5日後終値): {metrics['dir_rate']:.1f}%  ({metrics['dir_n']}件)")
+    # 市場フィルターあり：MAパターン別比較
+    MA_PATTERNS = [
+        (5,  25, "MA5/25"),
+        (10, 25, "MA10/25"),
+        (25, 75, "MA25/75"),
+    ]
+    filter_results = {}
+    for fast, slow, label in MA_PATTERNS:
+        print(f"  [市場フィルター {label}] 実行中...", end="\r")
+        trades_f, dir_recs_f = run_backtest(
+            all_data, eval_dates, sl_buffer_mult=1.0,
+            nikkei_data=nikkei_data, use_market_filter=True,
+            nikkei_fast=fast, nikkei_slow=slow
+        )
+        filter_results[label] = {
+            'trades':  trades_f,
+            'metrics': calc_metrics(trades_f, dir_recs_f),
+            'monthly': calc_monthly_analysis(trades_f),
+        }
+    # 後の表示用に最初のパターンを代表として保持
+    trades_f  = filter_results['MA5/25']['trades']
+    metrics_f = filter_results['MA5/25']['metrics']
+    print()
+
+    # ──── 比較表表示 ────
+    print("\n" + "=" * 72)
+    print("【SLバッファ比較】")
+    print("=" * 72)
+    header = f"{'指標':<22}" + "".join(f"{'×'+str(m):>8}" for m in SL_BUFFER_MULTS)
+    print(header)
+    print("-" * 72)
+
+    def row(label, key, fmt=".1f"):
+        vals = "".join(f"{all_metrics[m][key]:{'>8'+fmt}}" for m in SL_BUFFER_MULTS)
+        print(f"{label:<22}{vals}")
+
+    row("勝率(%)",           "win_rate")
+    row("プロフィットF",     "pf",       ".2f")
+    row("SL到達件数",        "sl_losses", "d")
+    row("平均損益(%)",       "avg_pnl",  ".2f")
+    row("平均MFE(%)",        "avg_mfe",  ".2f")
+    row("平均MAE(%)",        "avg_mae",  ".2f")
+    row("SL早すぎ疑い率(%)", "sl_ohlc_pos_rate")
+    print("-" * 72)
+
+    # ──── ベースライン(×1.0)の詳細表示 ────
+    base = all_metrics[1.0]
+    print(f"\n【詳細：SL×1.0（現状）】")
+    print(f"  総トレード数  : {base['n']}")
+    print(f"  勝ち計        : {base['wins']}  (TP到達:{base['tp_wins']} + 強制益:{base['f_wins']})")
+    print(f"  負け計        : {base['losses']}  (SL到達:{base['sl_losses']} + 強制損:{base['f_losses']})")
+    print(f"  方向的中率(5日後終値): {base['dir_rate']:.1f}%")
+    print()
+    print("  【OHLC分析】")
+    print(f"  全トレード平均  : {base['avg_ohlc_all']:+.3f}%")
+    print(f"  SL到達平均      : {base['avg_ohlc_sl']:+.3f}%")
+    print(f"  SL到達でOHLCプラス: {base['sl_ohlc_positive']}件/{base['sl_losses']}件 ({base['sl_ohlc_pos_rate']:.1f}%)")
+    day_labels = ["1日目", "2日目", "3日目", "4日目", "5日目"]
+    for label, val in zip(day_labels, base['ohlc_day_avgs']):
+        print(f"    {label}: {val:+.3f}%")
+
+    # ──── 市場フィルター MAパターン比較表示 ────
+    base = all_metrics[1.0]
+    print("\n" + "=" * 76)
+    print("【市場環境フィルター MAパターン比較（SL×1.0）】")
+    print("=" * 76)
+    col_w = 12
+    header = f"{'指標':<20}{'なし':>{col_w}}" + "".join(f"{lb:>{col_w}}" for _, _, lb in MA_PATTERNS)
+    print(header)
+    print("-" * 76)
+
+    def frow(label, key, fmt=".1f"):
+        base_v = f"{base[key]:{fmt}}"
+        vals = "".join(f"{f'{filter_results[lb]['metrics'][key]:{fmt}}':>{col_w}}"
+                       for _, _, lb in MA_PATTERNS)
+        print(f"{label:<20}{base_v:>{col_w}}{vals}")
+
+    def frow_calc(label, fn):
+        base_v = fn(base)
+        vals = "".join(f"{fn(filter_results[lb]['metrics']):>{col_w}}"
+                       for _, _, lb in MA_PATTERNS)
+        print(f"{label:<20}{base_v:>{col_w}}{vals}")
+
+    frow("総トレード数",   "n",        "d")
+    frow("勝率(%)",       "win_rate",  ".1f")
+    frow("プロフィットF", "pf",        ".2f")
+    frow("SL到達件数",    "sl_losses", "d")
+    frow_calc("SL到達率(%)",
+              lambda m: f"{m['sl_losses']/m['n']*100:.1f}" if m['n'] > 0 else "-")
+    frow("平均損益(%)",   "avg_pnl",   "+.2f")
+    frow("方向的中率(%)", "dir_rate",  ".1f")
+    print("-" * 76)
+
+    # 各パターンの月別買い/売り件数を表示
+    for _, _, lb in MA_PATTERNS:
+        monthly_f = filter_results[lb]['monthly']
+        print(f"\n【月別成績（{lb}フィルター）】")
+        print(f"  {'月':<8}{'全件':>5}{'全PF':>6}  {'買い件':>6}{'買PF':>6}  {'売り件':>6}{'売PF':>6}")
+        print("  " + "-" * 52)
+        for ym, g in monthly_f.items():
+            a, b, s = g['all'], g['buy'], g['sell']
+            def pf_s(v): return f"{v:.2f}" if v != float('inf') else " inf"
+            print(f"  {ym:<8}{a['n']:>5}{pf_s(a['pf']):>6}  "
+                  f"{b['n']:>6}{pf_s(b['pf']):>6}  "
+                  f"{s['n']:>6}{pf_s(s['pf']):>6}")
+        print("  " + "-" * 52)
+
+    # ──── 方向×トレンド一致/不一致 分析（ベースライン×1.0のみ） ────
+    dt_analysis = calc_direction_trend_analysis(all_trades[1.0])
+
+    print("\n" + "=" * 72)
+    print("【方向 × トレンド一致/不一致 分析（SL×1.0）】")
+    print("  ※順張り = シグナル方向とMA乖離方向が一致")
+    print("  ※逆張り = 不一致（ダイバージェンス相当）")
+    print("=" * 72)
+    hdr = f"{'グループ':<14}{'件数':>6}{'勝率':>8}{'PF':>7}{'SL率':>8}{'平均損益':>9}"
+    print(hdr)
+    print("-" * 72)
+    for label in ['買い×順張り', '買い×逆張り', '売り×順張り', '売り×逆張り']:
+        g = dt_analysis[label]
+        pf_str = f"{g['pf']:.2f}" if g['pf'] != float('inf') else " inf"
+        print(f"{label:<14}{g['n']:>6}{g['win_rate']:>7.1f}%{pf_str:>7}{g['sl_rate']:>7.1f}%{g['avg_pnl']:>+8.2f}%")
+    print("-" * 72)
+
+    # ──── 月別分析（ベースライン×1.0のみ） ────
+    monthly = calc_monthly_analysis(all_trades[1.0])
+
+    print("\n" + "=" * 80)
+    print("【月別成績（SL×1.0）】")
+    print("=" * 80)
+    print(f"{'月':<8}{'全件':>5}{'全勝率':>7}{'全PF':>6}  "
+          f"{'買い件':>6}{'買勝率':>7}{'買PF':>6}  "
+          f"{'売り件':>6}{'売勝率':>7}{'売PF':>6}")
+    print("-" * 80)
+    for ym, g in monthly.items():
+        a, b, s = g['all'], g['buy'], g['sell']
+        def pf_s(v): return f"{v:.2f}" if v != float('inf') else " inf"
+        print(f"{ym:<8}{a['n']:>5}{a['win_rate']:>6.1f}%{pf_s(a['pf']):>6}  "
+              f"{b['n']:>6}{b['win_rate']:>6.1f}%{pf_s(b['pf']):>6}  "
+              f"{s['n']:>6}{s['win_rate']:>6.1f}%{pf_s(s['pf']):>6}")
+    print("-" * 80)
 
     # ──── CSV出力 ────
+    # 全バッファの明細を1ファイルに統合
     trade_csv = 'backtest_swing_trades.csv'
     with open(trade_csv, 'w', newline='', encoding='utf-8-sig') as f:
         writer = csv.DictWriter(f, fieldnames=[
-            'eval_dt','code','direction','entry','tp','sl','exit',
-            'result','pnl_pct','rr_real','mfe_pct','mae_pct'
+            'sl_buffer_mult','eval_dt','code','direction','entry','tp','sl','exit',
+            'result','pnl_pct','rr_real','mfe_pct','mae_pct',
+            'd1_ohlc_pct','d2_ohlc_pct','d3_ohlc_pct','d4_ohlc_pct','d5_ohlc_pct',
+            'cumulative_ohlc','ma_divergence','trend_aligned','swing_rank',
         ])
         writer.writeheader()
-        writer.writerows(trade_records)
-    print(f"\n全トレード明細: {trade_csv}")
+        for mult in SL_BUFFER_MULTS:
+            writer.writerows(all_trades[mult])
+    print(f"\n全トレード明細（全バッファ統合）: {trade_csv}")
 
+    # 比較サマリーCSV
     summary_csv = 'backtest_swing_summary.csv'
     with open(summary_csv, 'w', newline='', encoding='utf-8-sig') as f:
         writer = csv.writer(f)
-        writer.writerow(['指標', '値'])
-        writer.writerow(['総トレード数',         metrics['n']])
-        writer.writerow(['勝ち計',                metrics['wins']])
-        writer.writerow(['  うちTP到達',          metrics['tp_wins']])
-        writer.writerow(['  うち強制益',          metrics['f_wins']])
-        writer.writerow(['負け計',                metrics['losses']])
-        writer.writerow(['  うちSL到達',          metrics['sl_losses']])
-        writer.writerow(['  うち強制損',          metrics['f_losses']])
-        writer.writerow(['勝率',                  f"{metrics['win_rate']:.1f}%"])
-        writer.writerow(['プロフィットファクター', f"{metrics['pf']:.2f}"])
-        writer.writerow(['平均RR(実績)',           f"{metrics['avg_rr']:.2f}"])
-        writer.writerow(['平均損益',              f"{metrics['avg_pnl']:.2f}%"])
-        writer.writerow(['平均MFE',               f"{metrics['avg_mfe']:.2f}%"])
-        writer.writerow(['平均MAE',               f"{metrics['avg_mae']:.2f}%"])
-        writer.writerow(['方向的中率(5日後終値)',  f"{metrics['dir_rate']:.1f}%"])
-        writer.writerow(['方向的中率サンプル数',   metrics['dir_n']])
-    print(f"サマリー: {summary_csv}")
+        writer.writerow(['指標'] + [f'SL×{m}' for m in SL_BUFFER_MULTS])
+        for key, label in [
+            ('win_rate',          '勝率(%)'),
+            ('pf',                'プロフィットF'),
+            ('tp_wins',           'TP到達'),
+            ('f_wins',            '強制益'),
+            ('sl_losses',         'SL到達'),
+            ('f_losses',          '強制損'),
+            ('avg_pnl',           '平均損益(%)'),
+            ('avg_mfe',           '平均MFE(%)'),
+            ('avg_mae',           '平均MAE(%)'),
+            ('dir_rate',          '方向的中率(%)'),
+            ('avg_ohlc_all',      'OHLC累積_全平均'),
+            ('avg_ohlc_sl',       'OHLC累積_SL到達平均'),
+            ('sl_ohlc_pos_rate',  'SL早すぎ疑い率(%)'),
+            ('sl_ohlc_positive',  'SL到達でOHLCプラス件数'),
+        ]:
+            writer.writerow([label] + [all_metrics[m][key] for m in SL_BUFFER_MULTS])
+    print(f"比較サマリー: {summary_csv}")
+
+    # 方向×トレンド分析CSV
+    trend_csv = 'backtest_swing_trend_analysis.csv'
+    with open(trend_csv, 'w', newline='', encoding='utf-8-sig') as f:
+        writer = csv.writer(f)
+        writer.writerow(['グループ', '件数', '勝率(%)', 'PF', 'SL率(%)', '平均損益(%)'])
+        for label in ['買い×順張り', '買い×逆張り', '売り×順張り', '売り×逆張り']:
+            g = dt_analysis[label]
+            pf_val = g['pf'] if g['pf'] != float('inf') else 'inf'
+            writer.writerow([label, g['n'], g['win_rate'], pf_val, g['sl_rate'], g['avg_pnl']])
+    print(f"方向×トレンド分析: {trend_csv}")
+
+    monthly_csv = 'backtest_swing_monthly.csv'
+    with open(monthly_csv, 'w', newline='', encoding='utf-8-sig') as f:
+        writer = csv.writer(f)
+        writer.writerow(['月', '全件数', '全勝率(%)', '全PF', '全平均損益(%)',
+                         '買い件数', '買い勝率(%)', '買いPF', '買い平均損益(%)',
+                         '売り件数', '売り勝率(%)', '売りPF', '売り平均損益(%)'])
+        for ym, g in monthly.items():
+            a, b, s = g['all'], g['buy'], g['sell']
+            def pf_v(v): return v if v != float('inf') else 'inf'
+            writer.writerow([ym,
+                a['n'], a['win_rate'], pf_v(a['pf']), a['avg_pnl'],
+                b['n'], b['win_rate'], pf_v(b['pf']), b['avg_pnl'],
+                s['n'], s['win_rate'], pf_v(s['pf']), s['avg_pnl'],
+            ])
+    print(f"月別分析: {monthly_csv}")
+
+    # 市場フィルターあり明細CSV（MA5/25版を保存）
+    filtered_csv = 'backtest_swing_filtered.csv'
+    trades_f = filter_results['MA5/25']['trades']
+    with open(filtered_csv, 'w', newline='', encoding='utf-8-sig') as f:
+        writer = csv.DictWriter(f, fieldnames=[
+            'sl_buffer_mult','eval_dt','code','direction','entry','tp','sl','exit',
+            'result','pnl_pct','rr_real','mfe_pct','mae_pct',
+            'd1_ohlc_pct','d2_ohlc_pct','d3_ohlc_pct','d4_ohlc_pct','d5_ohlc_pct',
+            'cumulative_ohlc','ma_divergence','trend_aligned','swing_rank',
+        ])
+        writer.writeheader()
+        writer.writerows(trades_f)
+    print(f"市場フィルターあり明細: {filtered_csv}")
