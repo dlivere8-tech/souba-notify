@@ -616,7 +616,8 @@ for r in all_results:
 # TOP10選出
 # ========================================
 dt_top10    = sorted(all_results, key=lambda x: x['daytrade_score'], reverse=True)[:10]
-swing_valid = [r for r in all_results if r['swing_rr_valid']]
+# ルール2: 前日比 ±3% 超は急騰・急落銘柄として除外（バックテスト最適閾値）
+swing_valid = [r for r in all_results if r['swing_rr_valid'] and abs(r['change_pct']) <= 3.0]
 swing_top10 = sorted(swing_valid, key=lambda x: x['swing_score'], reverse=True)[:10]
 
 dt_dir_map    = {r['code']: r['dt_direction']    for r in dt_top10}
