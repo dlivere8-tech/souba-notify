@@ -157,6 +157,48 @@
         --text: #1c1c1e; --muted: #8e8e93; --border: #c6c6c8;
       }
     }
+
+    /* Search overlay */
+    .search-overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,.7);
+      z-index: 1000; display: flex; align-items: flex-start;
+      justify-content: center; padding: 20px 14px;
+    }
+    .search-modal {
+      background: var(--surface); border-radius: var(--r);
+      width: 100%; max-width: 480px; padding: 14px;
+      border: 1px solid var(--border);
+    }
+    .search-modal-hdr {
+      display: flex; align-items: center; gap: 8px; margin-bottom: 10px;
+    }
+    .search-input {
+      flex: 1; background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 8px; color: var(--text); padding: 10px 12px;
+      font-size: 16px; -webkit-appearance: none;
+    }
+    .search-input:focus { outline: none; border-color: var(--accent); }
+    .search-result-item {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 11px 10px; border-radius: 8px; cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .search-result-item:active { background: var(--surface2); }
+    .search-res-name { font-size: 14px; font-weight: 500; }
+    .search-res-code { font-size: 12px; color: var(--muted); margin-left: 8px; }
+    .search-empty { font-size: 13px; color: var(--muted); text-align: center; padding: 16px; }
+
+    .ticker-item-wrap { display: flex; flex-direction: column; gap: 3px; }
+    .ticker-input-row { display: flex; gap: 3px; }
+    .search-btn {
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 8px; color: var(--muted); padding: 0 6px;
+      font-size: 13px; cursor: pointer; flex-shrink: 0;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .search-btn:active { opacity: .7; }
+
+    .score-note { font-size: 10px; color: var(--muted); margin-top: 3px; }
   </style>
 </head>
 <body>
@@ -174,6 +216,19 @@
     <div class="settings-title">ウォッチリスト（4桁銘柄コード）</div>
     <div class="ticker-grid" id="tickerGrid"></div>
     <button class="btn btn-primary btn-sm" onclick="saveAndApply()">保存して適用</button>
+  </div>
+
+  <!-- Search overlay -->
+  <div class="search-overlay" id="searchOverlay" style="display:none" onclick="handleOverlayClick(event)">
+    <div class="search-modal">
+      <div class="search-modal-hdr">
+        <input class="search-input" id="searchInput" type="text"
+          placeholder="銘柄名で検索（例：トヨタ）"
+          oninput="doSearch(this.value)" autocomplete="off">
+        <button class="btn btn-secondary btn-sm" onclick="closeSearch()">✕</button>
+      </div>
+      <div id="searchResults"><div class="search-empty">銘柄名を入力してください</div></div>
+    </div>
   </div>
 
   <div class="cards-container" id="cardsContainer"></div>
@@ -508,30 +563,73 @@ async function fetchYFChart(code) {
   return { name, dates, highs, lows, closes, volumes };
 }
 
-async function fetchShinyoBairitu(code) {
-  try {
-    const url     = `https://finance.yahoo.co.jp/quote/${code}.T`;
-    const proxied = ALLORIGINS + encodeURIComponent(url);
-    const ctrl    = new AbortController();
-    const tid     = setTimeout(() => ctrl.abort(), 10000);
-    const res     = await fetch(proxied, { signal: ctrl.signal });
-    clearTimeout(tid);
-    const json    = await res.json();
-    const html    = json.contents;
-    if (!html) return null;
-    const doc = new DOMParser().parseFromString(html, 'text/html');
-    for (const dt of doc.querySelectorAll('dt')) {
-      if (dt.textContent.includes('信用倍率')) {
-        const dd = dt.nextElementSibling;
-        if (dd) {
-          const m = dd.textContent.replace(/,/g, '').match(/[\d.]+/);
-          if (m) return parseFloat(m[0]);
-        }
+function _parseShinyoFromHtml(html) {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+
+  // Strategy 1: dt/dd pairs
+  for (const dt of doc.querySelectorAll('dt')) {
+    if (dt.textContent.includes('信用倍率')) {
+      const dd = dt.nextElementSibling;
+      if (dd) {
+        const m = dd.textContent.replace(/,/g, '').match(/[\d.]+/);
+        if (m) return parseFloat(m[0]);
       }
     }
-  } catch {
-    // silent fail
   }
+
+  // Strategy 2: th/td pairs
+  for (const th of doc.querySelectorAll('th')) {
+    if (th.textContent.includes('信用倍率')) {
+      const td = th.nextElementSibling;
+      if (td) {
+        const m = td.textContent.replace(/,/g, '').match(/[\d.]+/);
+        if (m) return parseFloat(m[0]);
+      }
+    }
+  }
+
+  // Strategy 3: regex on raw HTML
+  const re = /信用倍率[^0-9]{0,40}?([\d]{1,5}\.[\d]{1,2})/;
+  const mm = html.replace(/,/g, '').match(re);
+  if (mm) return parseFloat(mm[1]);
+
+  return null;
+}
+
+async function fetchShinyoBairitu(code) {
+  const url = `https://finance.yahoo.co.jp/quote/${code}`;
+
+  // Try 1: corsproxy.io (returns raw HTML)
+  try {
+    const proxied = CORS_PROXY + encodeURIComponent(url);
+    const ctrl = new AbortController();
+    const tid  = setTimeout(() => ctrl.abort(), 12000);
+    const res  = await fetch(proxied, { signal: ctrl.signal });
+    clearTimeout(tid);
+    if (res.ok) {
+      const html = await res.text();
+      const val  = _parseShinyoFromHtml(html);
+      if (val !== null) return val;
+    }
+  } catch { /* fall through */ }
+
+  // Try 2: allorigins.win fallback (JSON-wrapped)
+  try {
+    const proxied = ALLORIGINS + encodeURIComponent(url);
+    const ctrl = new AbortController();
+    const tid  = setTimeout(() => ctrl.abort(), 12000);
+    const res  = await fetch(proxied, { signal: ctrl.signal });
+    clearTimeout(tid);
+    if (res.ok) {
+      const json = await res.json();
+      const html = json.contents;
+      if (html) {
+        const val = _parseShinyoFromHtml(html);
+        if (val !== null) return val;
+      }
+    }
+  } catch { /* silent fail */ }
+
   return null;
 }
 
@@ -723,6 +821,7 @@ function buildCard(code) {
         <div class="score-bar">
           <div class="score-bar-fill" style="width:${clamp(dtScore)}%;background:${sBg(dtScore)}"></div>
         </div>
+        <div class="score-note">※参考値（メールと異なる場合あり）</div>
       </div>
       <div class="score-box">
         <div class="score-label">スイングスコア</div>
@@ -733,6 +832,7 @@ function buildCard(code) {
         <div class="score-bar">
           <div class="score-bar-fill" style="width:${clamp(swScore)}%;background:${sBg(swScore)}"></div>
         </div>
+        <div class="score-note">※参考値（メールと異なる場合あり）</div>
       </div>
     </div>
 
@@ -777,6 +877,81 @@ function updateLastUpdated() {
 }
 
 // ─────────────────────────────────────────────
+// Stock Name Search
+// ─────────────────────────────────────────────
+
+let _searchTargetIdx = -1;
+let _searchTimer = null;
+
+function openSearch(idx) {
+  _searchTargetIdx = idx;
+  document.getElementById('searchInput').value = '';
+  document.getElementById('searchResults').innerHTML =
+    '<div class="search-empty">銘柄名を入力してください</div>';
+  document.getElementById('searchOverlay').style.display = 'flex';
+  setTimeout(() => document.getElementById('searchInput').focus(), 80);
+}
+
+function closeSearch() {
+  document.getElementById('searchOverlay').style.display = 'none';
+  _searchTargetIdx = -1;
+}
+
+function handleOverlayClick(e) {
+  if (e.target === document.getElementById('searchOverlay')) closeSearch();
+}
+
+function doSearch(query) {
+  clearTimeout(_searchTimer);
+  const q = query.trim();
+  if (!q) {
+    document.getElementById('searchResults').innerHTML =
+      '<div class="search-empty">銘柄名を入力してください</div>';
+    return;
+  }
+  document.getElementById('searchResults').innerHTML =
+    '<div class="search-empty">検索中...</div>';
+  _searchTimer = setTimeout(() => _execSearch(q), 350);
+}
+
+async function _execSearch(q) {
+  try {
+    const apiUrl = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(q)}&lang=ja&region=JP&quotesCount=10&newsCount=0`;
+    const proxied = CORS_PROXY + encodeURIComponent(apiUrl);
+    const res = await fetch(proxied, { signal: AbortSignal.timeout(8000) });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
+    const quotes = (json.quotes || []).filter(q =>
+      q.exchange === 'TKY' || q.exchange === 'OSA' || (q.symbol && q.symbol.endsWith('.T'))
+    );
+    if (!quotes.length) {
+      document.getElementById('searchResults').innerHTML =
+        '<div class="search-empty">該当銘柄なし</div>';
+      return;
+    }
+    document.getElementById('searchResults').innerHTML = quotes.slice(0, 8).map(q => {
+      const code = (q.symbol || '').replace('.T', '');
+      const name = q.shortname || q.longname || code;
+      return `<div class="search-result-item" onclick="selectSearchResult('${code}', '${name.replace(/'/g,"\\'")}')">
+        <span class="search-res-name">${name}</span>
+        <span class="search-res-code">${code}</span>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    document.getElementById('searchResults').innerHTML =
+      `<div class="search-empty">取得エラー: ${e.message}</div>`;
+  }
+}
+
+function selectSearchResult(code, _name) {
+  if (_searchTargetIdx >= 0) {
+    const el = document.getElementById(`ti-${_searchTargetIdx}`);
+    if (el) el.value = code;
+  }
+  closeSearch();
+}
+
+// ─────────────────────────────────────────────
 // Settings
 // ─────────────────────────────────────────────
 
@@ -787,10 +962,13 @@ function toggleSettings() {
 
 function renderTickerInputs() {
   document.getElementById('tickerGrid').innerHTML = tickers.map((code, i) => `
-    <div class="ticker-item">
-      <label>${i + 1}</label>
-      <input type="text" class="ticker-input" id="ti-${i}"
-        value="${code}" maxlength="4" inputmode="numeric" placeholder="----">
+    <div class="ticker-item-wrap">
+      <label style="font-size:11px;color:var(--muted);text-align:center">${i + 1}</label>
+      <div class="ticker-input-row">
+        <input type="text" class="ticker-input" id="ti-${i}"
+          value="${code}" maxlength="4" inputmode="numeric" placeholder="----">
+        <button class="search-btn" onclick="openSearch(${i})" title="銘柄名検索">🔍</button>
+      </div>
     </div>`).join('');
 }
 
@@ -800,9 +978,10 @@ function saveAndApply() {
     return el ? el.value.trim().replace(/[^0-9]/g, '') : '';
   });
   localStorage.setItem(STORAGE_KEY, JSON.stringify(tickers));
+  stockResults = {};
   toggleSettings();
   renderTickerInputs();
-  renderCards();
+  updateAll();
 }
 
 // ─────────────────────────────────────────────
