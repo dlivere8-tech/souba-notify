@@ -435,14 +435,55 @@ function getFinalSwingScore(raw, shinyo) {
 }
 
 // ─────────────────────────────────────────────
+// Proxy Fetch Utilities
+// ─────────────────────────────────────────────
+
+// AbortSignal.timeout polyfill (not available in Safari < 16)
+function _timeoutSignal(ms) {
+  const ctrl = new AbortController();
+  setTimeout(() => ctrl.abort(), ms);
+  return ctrl.signal;
+}
+
+// Fetch targetUrl via CORS proxy.
+// Tries allorigins.win/raw first, falls back to allorigins.win/get (JSON-wrapped).
+// Returns { text(), json() } like a Response.
+async function proxyFetch(targetUrl, timeoutMs = 20000) {
+  const encoded = encodeURIComponent(targetUrl);
+
+  // --- Attempt 1: allorigins.win/raw (returns raw body) ---
+  try {
+    const res = await fetch(
+      'https://api.allorigins.win/raw?url=' + encoded,
+      { signal: _timeoutSignal(timeoutMs) }
+    );
+    if (res.ok) return res;  // native Response — .text() / .json() work as-is
+  } catch { /* fall through */ }
+
+  // --- Attempt 2: allorigins.win/get (returns { contents: "..." }) ---
+  const res2 = await fetch(
+    'https://api.allorigins.win/get?url=' + encoded,
+    { signal: _timeoutSignal(timeoutMs) }
+  );
+  if (!res2.ok) throw new Error(`プロキシHTTP ${res2.status}`);
+  const wrapped = await res2.json();
+  const body = wrapped.contents;
+  if (!body) throw new Error('プロキシ空レスポンス');
+  // Return a thin wrapper with the same .text() / .json() interface
+  return {
+    ok: true,
+    text: () => Promise.resolve(body),
+    json: () => Promise.resolve(JSON.parse(body)),
+  };
+}
+
+// ─────────────────────────────────────────────
 // Data Fetching
 // ─────────────────────────────────────────────
 async function fetchYFChart(code) {
-  const url     = `${YF_CHART_BASE}${code}.T?interval=1d&range=6mo`;
-  const proxied = ALLORIGINS_RAW + encodeURIComponent(url);
-  const res = await fetch(proxied, { signal: AbortSignal.timeout(15000) });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const json   = await res.json();
+  const yfUrl = `${YF_CHART_BASE}${code}.T?interval=1d&range=6mo`;
+  const res   = await proxyFetch(yfUrl, 20000);
+  const json  = await res.json();
   const result = json?.chart?.result?.[0];
   if (!result) throw new Error('データなし');
   const meta = result.meta;
@@ -460,24 +501,16 @@ async function fetchYFChart(code) {
 }
 
 async function fetchShinyoBairitu(code) {
-  // Source: kabutan.jp via allorigins.win/raw
-  // Parse: 信用倍率 section → last <td>NUMBER倍 in table
   try {
     const url = `https://kabutan.jp/stock/finance?code=${code}`;
-    const proxied = ALLORIGINS_RAW + encodeURIComponent(url);
-    const res = await fetch(proxied, { signal: AbortSignal.timeout(15000) });
-    if (!res.ok) return null;
+    const res = await proxyFetch(url, 18000);
     const html = await res.text();
-    // Find 信用倍率 section header then the table data
     const idx = html.indexOf('\u4fe1\u7528\u500d\u7387'); // 信用倍率
     if (idx < 0) return null;
     const section = html.slice(idx, idx + 1200);
-    const tableEnd = section.indexOf('</table>');
-    const tbl = tableEnd > 0 ? section.slice(0, tableEnd) : section;
-    // Find all <td>NUMBER<span...>倍 patterns
+    const tbl = section.slice(0, Math.max(section.indexOf('</table>'), section.length));
     const matches = [...tbl.matchAll(/<td>([\d.]+)<span[^>]*>\u500d<\/span>/g)];
-    if (matches.length === 0) return null;
-    // Last match is 信用倍率 (buy/sell ratio)
+    if (!matches.length) return null;
     return parseFloat(matches[matches.length - 1][1]);
   } catch {
     return null;
@@ -813,7 +846,7 @@ async function doRemoteSearch(q) {
   try {
     const apiUrl = `${YF_SEARCH_BASE}?q=${encodeURIComponent(q)}&lang=ja&region=JP&quotesCount=10&newsCount=0`;
     const proxied = ALLORIGINS_RAW + encodeURIComponent(apiUrl);
-    const res = await fetch(proxied, { signal: AbortSignal.timeout(8000) });
+    const res = await fetch(proxied, { signal: _timeoutSignal(8000) });
     if (!res.ok) return;
     const json = await res.json();
     const quotes = (json.quotes || []).filter(q =>
