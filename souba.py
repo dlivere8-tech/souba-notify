@@ -294,7 +294,7 @@ def calc_zigzag_trend(df, atr_val, ma75_col='MA75'):
       ma75_up  : True(上向き) / False(下向き) / None(判定不能)
     """
     recent = df.tail(21).dropna(subset=['High', 'Low', 'Close']).tail(20).copy().reset_index(drop=True)
-    threshold = atr_val * 1.5
+    threshold = atr_val * 1.0
     if not np.isfinite(threshold) or threshold <= 0 or len(recent) < 5:
         raise ValueError("threshold or data insufficient")
 
@@ -388,23 +388,8 @@ def calc_raw(code, name):
         ma75 = latest['MA75']
         ma_divergence = (ma25 - ma75) / ma75 * 100 if not pd.isna(ma25) and not pd.isna(ma75) and ma75 != 0 else 0.0
 
-        # ジグザグ + MA75 トレンド判定（エラー時はMA乖離でフォールバック）
-        try:
-            zz_trend, ma75_up = calc_zigzag_trend(df, atr_val, ma75_col='MA75')
-            if zz_trend == '上昇':
-                buy_trend_score  = 35 if ma75_up is True else 20
-                sell_trend_score = 0
-            elif zz_trend == '下降':
-                buy_trend_score  = 0
-                sell_trend_score = 35 if ma75_up is False else 20
-            else:  # ボックス
-                buy_trend_score = sell_trend_score = 15
-            trend = zz_trend
-        except Exception:
-            zz_trend = '上昇' if ma_divergence > 0 else '下降'
-            buy_trend_score  = 20 if ma_divergence > 0 else 0
-            sell_trend_score = 0  if ma_divergence > 0 else 20
-            trend = zz_trend
+        # トレンド方向（表示用）
+        trend = '上昇' if ma_divergence > 0 else '下降'
 
         atr_val = atr_series.dropna().iloc[-1] if atr_series is not None and not atr_series.isna().all() else 0
 
@@ -486,8 +471,6 @@ def calc_raw(code, name):
             'rsi':              rsi,
             'trend':            trend,
             'ma_divergence':    ma_divergence,
-            'buy_trend_score':  buy_trend_score,
-            'sell_trend_score': sell_trend_score,
             # デイトレ
             'dt_direction':   dt_direction,
             'dt_sup':         dt_sup,
@@ -547,6 +530,11 @@ rr_sells = [r['rr_sell_raw'] for r in all_results]
 buy_rr_sc  = rank_score(rr_buys,  higher_is_better=True, max_pts=15)
 sell_rr_sc = rank_score(rr_sells, higher_is_better=True, max_pts=15)
 
+# MA乖離率の相対ランキングでトレンドスコアを確定
+ma_divs = [r['ma_divergence'] for r in all_results]
+buy_trend_sc  = rank_score(ma_divs, higher_is_better=True,  max_pts=35)
+sell_trend_sc = rank_score(ma_divs, higher_is_better=False, max_pts=35)
+
 for i, r in enumerate(all_results):
     # %Bスコア（10点・絶対評価）
     pct_b = r['pct_b']
@@ -557,9 +545,8 @@ for i, r in enumerate(all_results):
         buy_bb_score = sell_bb_score = 0
 
     # 方向仮決定（MACDクロス計算のため）
-    # トレンド35点はジグザグ+MA75の絶対スコアを直接使用
-    buy_score_tmp  = r['buy_trend_score']  + r['buy_rsi_score']  + buy_rr_sc[i]  + buy_bb_score
-    sell_score_tmp = r['sell_trend_score'] + r['sell_rsi_score'] + sell_rr_sc[i] + sell_bb_score
+    buy_score_tmp  = buy_trend_sc[i]  + r['buy_rsi_score']  + buy_rr_sc[i]  + buy_bb_score
+    sell_score_tmp = sell_trend_sc[i] + r['sell_rsi_score'] + sell_rr_sc[i] + sell_bb_score
     tentative_dir  = "買い" if buy_score_tmp >= sell_score_tmp else "売り"
 
     # MACDクロス（10点・方向確定後）
