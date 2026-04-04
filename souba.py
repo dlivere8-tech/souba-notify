@@ -632,6 +632,17 @@ for r in all_results:
         elif r['swing_direction'] == "売り" and ratio <= 0.5:
             r['swing_score'] = round(r['swing_score'] - 10, 1)
 
+def get_nikkei_trend(fast=10, slow=25):
+    """日経平均MA10/MA25でトレンド判定。返値: '買い'/'売り'/None"""
+    try:
+        df = yf.Ticker("^N225").history(period="3mo", auto_adjust=False)
+        if df.empty or len(df) < slow:
+            return None
+        closes = df['Close'].values.astype(float)
+        return '買い' if closes[-fast:].mean() >= closes[-slow:].mean() else '売り'
+    except:
+        return None
+
 # ========================================
 # TOP10選出
 # ========================================
@@ -669,17 +680,6 @@ def get_yf(symbol, is_rate=False):
         return (curr, f"{change:+.3f}", f"{pct:+.2f}%") if is_rate else (curr, f"{change:+,.1f}", f"{pct:+.2f}%")
     except:
         return None, "-", "-"
-
-def get_nikkei_trend(fast=10, slow=25):
-    """日経平均MA10/MA25でトレンド判定。返値: '買い'/'売り'/None"""
-    try:
-        df = yf.Ticker("^N225").history(period="3mo", auto_adjust=False)
-        if df.empty or len(df) < slow:
-            return None
-        closes = df['Close'].values.astype(float)
-        return '買い' if closes[-fast:].mean() >= closes[-slow:].mean() else '売り'
-    except:
-        return None
 
 dow,    dow_c,    dow_p    = get_yf("^DJI")
 sp,     sp_c,     sp_p     = get_yf("^GSPC")
