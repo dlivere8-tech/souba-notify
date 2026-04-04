@@ -418,16 +418,22 @@ def calc_raw(code, name):
         # ========================================
         # スイング用HVN（改善①）
         # ========================================
-        sup_buy_p, res_buy_p = calc_hvn(df, curr, atr=atr_val)
+        # 利確目標：ATR×2以上離れた遠いHVN（なければATR×3フォールバック）
+        sup_tp_p, res_tp_p = calc_hvn(df, curr, atr=atr_val)
+        # 損切ライン：現在値に最も近いHVN（なければATR×1フォールバック）
+        sup_sl_p, res_sl_p = calc_hvn(df, curr)
+        buy_sl  = sup_sl_p if sup_sl_p is not None else (curr - atr_val if atr_val > 0 else None)
+        sell_sl = res_sl_p if res_sl_p is not None else (curr + atr_val if atr_val > 0 else None)
 
-        # RR計算：損切はATRベース、利確はHVNベース
-        # 買い: 利確=HVN上値、損切=curr-ATR
-        # 売り: 利確=HVN下値、損切=curr+ATR
+        # RR計算：利確=遠HVN、損切=近HVN
         rr_buy = rr_sell = 0.0
-        if res_buy_p is not None and atr_val > 0:
-            rr_buy  = abs(res_buy_p - curr) / atr_val
-        if sup_buy_p is not None and atr_val > 0:
-            rr_sell = abs(curr - sup_buy_p) / atr_val
+        if res_tp_p is not None and buy_sl is not None and curr != buy_sl:
+            rr_buy  = abs(res_tp_p - curr) / abs(curr - buy_sl)
+        if sup_tp_p is not None and sell_sl is not None and curr != sell_sl:
+            rr_sell = abs(curr - sup_tp_p) / abs(sell_sl - curr)
+
+        # 後段で使う変数名を従来名に合わせる
+        sup_buy_p, res_buy_p = sup_tp_p, res_tp_p
 
         # ========================================
         # ボリバン %B（改善④）
@@ -495,8 +501,10 @@ def calc_raw(code, name):
             'rr_sell_raw':    rr_sell,
             'buy_rsi_score':  buy_rsi_score,
             'sell_rsi_score': sell_rsi_score,
-            'sup_buy_price':  sup_buy_p,
-            'res_buy_price':  res_buy_p,
+            'sup_buy_price':  sup_buy_p,   # 買い利確（遠HVN上値）
+            'res_buy_price':  res_buy_p,   # 売り利確（遠HVN下値）
+            'buy_sl_price':   buy_sl,      # 買い損切（近HVN下値）
+            'sell_sl_price':  sell_sl,     # 売り損切（近HVN上値）
             'pct_b':          pct_b,
             # MACDは方向確定後に計算するため一時保存用
             '_df':            df,
@@ -580,15 +588,15 @@ for i, r in enumerate(all_results):
     if buy_score >= sell_score:
         r['swing_direction'] = "買い"
         r['swing_score']     = round(buy_score, 1)
-        r['swing_sup']       = r['price'] - r['atr_val']   # 損切 = curr - ATR
-        r['swing_res']       = r['res_buy_price']           # 利確 = HVN上値
+        r['swing_sup']       = r['buy_sl_price']    # 損切 = 近HVN下値
+        r['swing_res']       = r['res_buy_price']   # 利確 = 遠HVN上値
         r['swing_rr']        = r['rr_buy_raw']
         r['swing_rr_valid']  = buy_rr_valid
     else:
         r['swing_direction'] = "売り"
         r['swing_score']     = round(sell_score, 1)
-        r['swing_sup']       = r['price'] + r['atr_val']   # 損切 = curr + ATR
-        r['swing_res']       = r['sup_buy_price']           # 利確 = HVN下値
+        r['swing_sup']       = r['sell_sl_price']   # 損切 = 近HVN上値
+        r['swing_res']       = r['sup_buy_price']   # 利確 = 遠HVN下値
         r['swing_rr']        = r['rr_sell_raw']
         r['swing_rr_valid']  = sell_rr_valid
 

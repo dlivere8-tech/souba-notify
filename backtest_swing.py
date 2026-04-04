@@ -220,13 +220,19 @@ def calc_indicators(df):
         atr_val = _atr(highs, lows, closes)
         pct_b   = _bb_pctb(closes)
 
-        # HVN（ATRベース損切・HVNベース利確）
-        sup_p, res_p = calc_hvn(df, curr, atr=atr_val)
+        # 利確目標：ATR×2以上離れた遠いHVN（なければATR×3フォールバック）
+        sup_tp, res_tp = calc_hvn(df, curr, atr=atr_val)
+        # 損切ライン：現在値に最も近いHVN（なければATR×1フォールバック）
+        sup_sl, res_sl = calc_hvn(df, curr)
+        buy_sl  = sup_sl if sup_sl is not None else (curr - atr_val if atr_val > 0 else None)
+        sell_sl = res_sl if res_sl is not None else (curr + atr_val if atr_val > 0 else None)
+
+        # RR計算：利確=遠HVN、損切=近HVN
         rr_buy = rr_sell = 0.0
-        if res_p is not None and atr_val > 0:
-            rr_buy  = abs(res_p - curr) / atr_val
-        if sup_p is not None and atr_val > 0:
-            rr_sell = abs(curr - sup_p) / atr_val
+        if res_tp is not None and buy_sl is not None and curr != buy_sl:
+            rr_buy  = abs(res_tp - curr) / abs(curr - buy_sl)
+        if sup_tp is not None and sell_sl is not None and curr != sell_sl:
+            rr_sell = abs(curr - sup_tp) / abs(sell_sl - curr)
 
         return {
             'curr':          curr,
@@ -237,8 +243,10 @@ def calc_indicators(df):
             'pct_b':         pct_b,
             'rr_buy_raw':    rr_buy,
             'rr_sell_raw':   rr_sell,
-            'sup_price':     sup_p,
-            'res_price':     res_p,
+            'sup_price':     sup_tp,    # 売り利確（遠HVN下値）
+            'res_price':     res_tp,    # 買い利確（遠HVN上値）
+            'buy_sl_price':  buy_sl,    # 買い損切（近HVN下値）
+            'sell_sl_price': sell_sl,   # 売り損切（近HVN上値）
             '_closes':       closes,
             '_df':           df,
         }
@@ -289,20 +297,19 @@ def score_swing_new(raws):
         sell_score = sell_tmp + (macd if tent == "売り" else 0)
 
         atr = r['atr_val']
-        curr = r['curr']
         if buy_score >= sell_score:
             r['swing_direction'] = "買い"
             r['swing_score']     = round(buy_score, 1)
-            r['swing_tp']        = r['res_price']       # 利確 = HVN上値
-            r['swing_sl']        = curr - atr            # 損切 = curr - ATR
+            r['swing_tp']        = r['res_price']        # 利確 = 遠HVN上値
+            r['swing_sl']        = r['buy_sl_price']     # 損切 = 近HVN下値
             r['swing_rr']        = r['rr_buy_raw']
         else:
             r['swing_direction'] = "売り"
             r['swing_score']     = round(sell_score, 1)
-            r['swing_tp']        = r['sup_price']        # 利確 = HVN下値
-            r['swing_sl']        = curr + atr            # 損切 = curr + ATR
+            r['swing_tp']        = r['sup_price']        # 利確 = 遠HVN下値
+            r['swing_sl']        = r['sell_sl_price']    # 損切 = 近HVN上値
             r['swing_rr']        = r['rr_sell_raw']
-        r['swing_rr_valid'] = (r['swing_tp'] is not None and atr > 0)
+        r['swing_rr_valid'] = (r['swing_tp'] is not None and r['swing_sl'] is not None)
 
 
 # ─────────────────────────────────────────────
