@@ -451,17 +451,17 @@ def calc_raw(code, name):
             price_s * 10
         )
 
-        # RSIスコア（買い・売り共通、後で使う）
+        # RSIスコア（35点・5段階テーブル）
         if 40 <= rsi <= 60:
-            buy_rsi_score = 30; sell_rsi_score = 30
+            buy_rsi_score = 35; sell_rsi_score = 35
         elif 30 <= rsi < 40:
-            buy_rsi_score = 24; sell_rsi_score = 12
+            buy_rsi_score = 28; sell_rsi_score = 14
         elif 60 < rsi <= 70:
-            buy_rsi_score = 12; sell_rsi_score = 24
+            buy_rsi_score = 14; sell_rsi_score = 28
         elif rsi < 30:
-            buy_rsi_score = 30; sell_rsi_score = 0
+            buy_rsi_score = 35; sell_rsi_score = 0
         else:  # rsi > 70
-            buy_rsi_score = 0;  sell_rsi_score = 30
+            buy_rsi_score = 0;  sell_rsi_score = 35
 
         return {
             'code':             code,
@@ -530,23 +530,29 @@ rr_sells = [r['rr_sell_raw'] for r in all_results]
 buy_rr_sc  = rank_score(rr_buys,  higher_is_better=True, max_pts=15)
 sell_rr_sc = rank_score(rr_sells, higher_is_better=True, max_pts=15)
 
-# MA乖離率の相対ランキングでトレンドスコアを確定
-ma_divs = [r['ma_divergence'] for r in all_results]
-buy_trend_sc  = rank_score(ma_divs, higher_is_better=True,  max_pts=35)
-sell_trend_sc = rank_score(ma_divs, higher_is_better=False, max_pts=35)
+# トレンドスコア（20点・絶対評価）
+# MA25 > MA75 → 買い20点/売り0点　MA25 ≤ MA75 → 買い0点/売り20点
 
 for i, r in enumerate(all_results):
-    # %Bスコア（10点・絶対評価）
+    # トレンドスコア（絶対評価）
+    if r['ma_divergence'] > 0:
+        buy_trend_sc_i  = 20
+        sell_trend_sc_i = 0
+    else:
+        buy_trend_sc_i  = 0
+        sell_trend_sc_i = 20
+
+    # %Bスコア（20点・絶対評価）
     pct_b = r['pct_b']
     if pct_b is not None:
-        buy_bb_score  = max(0, round((1 - pct_b) * 10, 1))   # 低いほど高得点
-        sell_bb_score = max(0, round(pct_b * 10, 1))          # 高いほど高得点
+        buy_bb_score  = max(0, round((1 - pct_b) * 20, 1))   # 低いほど高得点
+        sell_bb_score = max(0, round(pct_b * 20, 1))          # 高いほど高得点
     else:
         buy_bb_score = sell_bb_score = 0
 
     # 方向仮決定（MACDクロス計算のため）
-    buy_score_tmp  = buy_trend_sc[i]  + r['buy_rsi_score']  + buy_rr_sc[i]  + buy_bb_score
-    sell_score_tmp = sell_trend_sc[i] + r['sell_rsi_score'] + sell_rr_sc[i] + sell_bb_score
+    buy_score_tmp  = buy_trend_sc_i  + r['buy_rsi_score']  + buy_rr_sc[i]  + buy_bb_score
+    sell_score_tmp = sell_trend_sc_i + r['sell_rsi_score'] + sell_rr_sc[i] + sell_bb_score
     tentative_dir  = "買い" if buy_score_tmp >= sell_score_tmp else "売り"
 
     # MACDクロス（10点・方向確定後）
@@ -752,19 +758,22 @@ def build_swing_table(results, earnings_flags, mismatch_codes=None):
     if mismatch_codes is None: mismatch_codes = set()
     thead = (
         "<tr style='background:#f5f5f5;'>"
-        "<th style='padding:6px 4px;text-align:left;font-size:11px;width:30%;'>銘柄</th>"
-        "<th style='padding:6px 4px;text-align:right;font-size:11px;white-space:nowrap;'>株価</th>"
-        "<th style='padding:6px 4px;text-align:right;font-size:11px;white-space:nowrap;'>状態</th>"
-        "<th style='padding:6px 4px;text-align:right;font-size:11px;white-space:nowrap;'>目安</th>"
-        "<th style='padding:6px 4px;text-align:right;font-size:11px;white-space:nowrap;'>信用倍率</th>"
-        "<th style='padding:6px 4px;text-align:right;font-size:11px;white-space:nowrap;'>点数</th>"
+        "<th style='padding:5px 4px;text-align:left;font-size:11px;'>銘柄</th>"
+        "<th style='padding:5px 4px;text-align:right;font-size:11px;white-space:nowrap;'>株価</th>"
+        "<th style='padding:5px 4px;text-align:right;font-size:11px;white-space:nowrap;'>売買</th>"
+        "<th style='padding:5px 4px;text-align:right;font-size:11px;white-space:nowrap;'>目安</th>"
+        "<th style='padding:5px 4px;text-align:right;font-size:11px;white-space:nowrap;'>信用</th>"
+        "<th style='padding:5px 4px;text-align:right;font-size:11px;white-space:nowrap;'>点数</th>"
         "</tr>"
     )
     tbody = ""
     for i, d in enumerate(results):
         earnings  = earnings_flags.get(d['code'], "")
-        earnings_html = ("<br><span style='color:#e65100;font-size:10px;font-weight:bold;'>&#9888;" + earnings + "</span>") if earnings else ""
-        mismatch_html = ("<br><span style='color:#6a1b9a;font-size:10px;font-weight:bold;'>&#9888;目線相違</span>") if d['code'] in mismatch_codes else ""
+        flags_html = ""
+        if earnings:
+            flags_html += f" <span style='color:#e65100;font-size:10px;font-weight:bold;'>&#9888;{earnings}</span>"
+        if d['code'] in mismatch_codes:
+            flags_html += f" <span style='color:#6a1b9a;font-size:10px;font-weight:bold;'>&#9888;目線相違</span>"
 
         price_str = f"{d['price']:,.0f}"
         pct_val   = d['change_pct']
@@ -777,18 +786,15 @@ def build_swing_table(results, earnings_flags, mismatch_codes=None):
         else:
             dir_color = "#1565c0"; dir_label = "↓売り"; score_color = "#0d47a1"
 
-        if d['trend'] == '上昇':   trend_label = "↑上昇"
-        elif d['trend'] == '下降': trend_label = "↓下降"
-        else:                       trend_label = "→箱"
-        status_str  = f"{trend_label} / RSI:{d['rsi']:.1f}"
+        # 状態欄：方向 + RSIのみ（トレンド向きは削除）
+        rsi_str = f"RSI:{d['rsi']:.1f}"
 
-        res_str = f"利: {d['swing_res']:,.0f}" if d['swing_res'] else "利: -"
-        sup_str = f"損: {d['swing_sup']:,.0f}" if d['swing_sup'] else "損: -"
+        res_str = f"利:{d['swing_res']:,.0f}" if d['swing_res'] else "利:-"
+        sup_str = f"損:{d['swing_sup']:,.0f}" if d['swing_sup'] else "損:-"
 
         score_str = str(d['swing_score'])
         rr_str    = f"RR:{d['swing_rr']:.1f}" if d['swing_rr'] > 0 else "RR:-"
-        # MACDクロスボーナス表示
-        macd_str  = "MACD✓" if d.get('macd_score', 0) > 0 else ""
+        macd_mark = "&#9733;" if d.get('macd_score', 0) > 0 else ""
 
         # 信用倍率表示
         ratio = d.get('shinyo_ratio')
@@ -797,7 +803,7 @@ def build_swing_table(results, earnings_flags, mismatch_codes=None):
             shinyo_color = "#999"
             shinyo_note  = ""
         else:
-            shinyo_str = f"{ratio:.2f}倍"
+            shinyo_str = f"{ratio:.1f}倍"
             if direction == "買い" and ratio >= 5.0:
                 shinyo_color = "#d32f2f"
                 shinyo_note  = "<div style='font-size:9px;color:#d32f2f;'>▼-10pt</div>"
@@ -810,25 +816,26 @@ def build_swing_table(results, earnings_flags, mismatch_codes=None):
 
         tbody += (
             "<tr>"
-            + f"<td style='padding:6px 4px;border-bottom:1px solid #eee;font-size:12px;font-weight:bold;'>"
-            + f"{i+1}. {d['name']}<br><span style='font-size:10px;font-weight:normal;color:#666;'>({d['code']})</span>"
-            + f"{earnings_html}{mismatch_html}</td>"
-            + f"<td style='padding:6px 4px;border-bottom:1px solid #eee;text-align:right;white-space:nowrap;'>"
+            + f"<td style='padding:5px 4px;border-bottom:1px solid #eee;font-size:12px;font-weight:bold;white-space:nowrap;'>"
+            + f"{i+1}. {d['name']}"
+            + f"<span style='font-size:10px;font-weight:normal;color:#888;'> {d['code']}</span>"
+            + flags_html + "</td>"
+            + f"<td style='padding:5px 4px;border-bottom:1px solid #eee;text-align:right;white-space:nowrap;'>"
             + f"<div style='font-size:12px;font-weight:bold;'>{price_str}</div>"
             + f"<div style='font-size:10px;color:{pct_color};font-weight:bold;'>{pct_str}</div></td>"
-            + f"<td style='padding:6px 4px;border-bottom:1px solid #eee;text-align:right;white-space:nowrap;'>"
+            + f"<td style='padding:5px 4px;border-bottom:1px solid #eee;text-align:right;white-space:nowrap;'>"
             + f"<div style='font-size:12px;font-weight:bold;color:{dir_color};'>{dir_label}</div>"
-            + f"<div style='font-size:10px;color:#666;'>{status_str}</div></td>"
-            + f"<td style='padding:6px 4px;border-bottom:1px solid #eee;text-align:right;white-space:nowrap;'>"
+            + f"<div style='font-size:10px;color:#666;'>{rsi_str}</div></td>"
+            + f"<td style='padding:5px 4px;border-bottom:1px solid #eee;text-align:right;white-space:nowrap;'>"
             + f"<div style='font-size:11px;font-weight:bold;color:#333;'>{res_str}</div>"
             + f"<div style='font-size:10px;color:#666;'>{sup_str}</div></td>"
-            + f"<td style='padding:6px 4px;border-bottom:1px solid #eee;text-align:right;white-space:nowrap;'>"
+            + f"<td style='padding:5px 4px;border-bottom:1px solid #eee;text-align:right;white-space:nowrap;'>"
             + f"<div style='font-size:12px;font-weight:bold;color:{shinyo_color};'>{shinyo_str}</div>"
             + shinyo_note + "</td>"
-            + f"<td style='padding:6px 4px;border-bottom:1px solid #eee;text-align:right;white-space:nowrap;'>"
+            + f"<td style='padding:5px 4px;border-bottom:1px solid #eee;text-align:right;white-space:nowrap;'>"
             + f"<div style='font-size:12px;font-weight:bold;color:{score_color};'>{score_str}</div>"
             + f"<div style='font-size:10px;color:#666;'>{rr_str}"
-            + (f" <span style='color:#ff6f00;'>&#9733;MACD</span>" if macd_str else "")
+            + (f" <span style='color:#ff6f00;'>{macd_mark}MACD</span>" if macd_mark else "")
             + f"</div></td>"
             + "</tr>"
         )
@@ -836,7 +843,7 @@ def build_swing_table(results, earnings_flags, mismatch_codes=None):
         "<div style='margin-top:16px;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.1);'>"
         "<div style='background:#1a237e;color:#fff;padding:12px 16px;'>"
         "<h2 style='margin:0;font-size:15px;'>今週のスイング推奨</h2>"
-        "<p style='margin:4px 0 0;font-size:11px;opacity:0.8;'>トレンド35・RSI30・RR15・%B10・MACD10</p>"
+        "<p style='margin:4px 0 0;font-size:11px;opacity:0.8;'>トレンド20(絶対)・RSI35・%B20・RR15・MACD10</p>"
         "</div><div style='overflow-x:auto;'><table style='width:100%;border-collapse:collapse;'>"
         "<thead>" + thead + "</thead><tbody>" + tbody + "</tbody></table></div></div>"
     )
