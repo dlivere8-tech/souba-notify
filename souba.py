@@ -409,14 +409,16 @@ def calc_raw(code, name):
         # ========================================
         # スイング用HVN（改善①）
         # ========================================
-        sup_buy_p, res_buy_p   = calc_hvn(df, curr)
-        res_sell_p, sup_sell_p = res_buy_p, sup_buy_p  # 売りは反転
+        sup_buy_p, res_buy_p = calc_hvn(df, curr)
 
+        # RR計算：損切はATRベース、利確はHVNベース
+        # 買い: 利確=HVN上値、損切=curr-ATR
+        # 売り: 利確=HVN下値、損切=curr+ATR
         rr_buy = rr_sell = 0.0
-        if sup_buy_p and res_buy_p and curr != sup_buy_p:
-            rr_buy = abs(res_buy_p - curr) / abs(curr - sup_buy_p)
-        if res_sell_p and sup_sell_p and curr != res_sell_p:
-            rr_sell = abs(curr - sup_sell_p) / abs(res_sell_p - curr)
+        if res_buy_p is not None and atr_val > 0:
+            rr_buy  = abs(res_buy_p - curr) / atr_val
+        if sup_buy_p is not None and atr_val > 0:
+            rr_sell = abs(curr - sup_buy_p) / atr_val
 
         # ========================================
         # ボリバン %B（改善④）
@@ -486,8 +488,6 @@ def calc_raw(code, name):
             'sell_rsi_score': sell_rsi_score,
             'sup_buy_price':  sup_buy_p,
             'res_buy_price':  res_buy_p,
-            'res_sell_price': res_sell_p,
-            'sup_sell_price': sup_sell_p,
             'pct_b':          pct_b,
             # MACDは方向確定後に計算するため一時保存用
             '_df':            df,
@@ -565,21 +565,21 @@ for i, r in enumerate(all_results):
     buy_score  = buy_score_tmp  + (macd_score if tentative_dir == "買い" else 0)
     sell_score = sell_score_tmp + (macd_score if tentative_dir == "売り" else 0)
 
-    buy_rr_valid  = (r['sup_buy_price']  is not None and r['res_buy_price']  is not None and r['rr_buy_raw']  > 0)
-    sell_rr_valid = (r['res_sell_price'] is not None and r['sup_sell_price'] is not None and r['rr_sell_raw'] > 0)
+    buy_rr_valid  = (r['res_buy_price'] is not None and r['rr_buy_raw']  > 0)
+    sell_rr_valid = (r['sup_buy_price'] is not None and r['rr_sell_raw'] > 0)
 
     if buy_score >= sell_score:
         r['swing_direction'] = "買い"
         r['swing_score']     = round(buy_score, 1)
-        r['swing_sup']       = r['sup_buy_price']
-        r['swing_res']       = r['res_buy_price']
+        r['swing_sup']       = r['price'] - r['atr_val']   # 損切 = curr - ATR
+        r['swing_res']       = r['res_buy_price']           # 利確 = HVN上値
         r['swing_rr']        = r['rr_buy_raw']
         r['swing_rr_valid']  = buy_rr_valid
     else:
         r['swing_direction'] = "売り"
         r['swing_score']     = round(sell_score, 1)
-        r['swing_sup']       = r['res_sell_price']
-        r['swing_res']       = r['sup_sell_price']
+        r['swing_sup']       = r['price'] + r['atr_val']   # 損切 = curr + ATR
+        r['swing_res']       = r['sup_buy_price']           # 利確 = HVN下値
         r['swing_rr']        = r['rr_sell_raw']
         r['swing_rr_valid']  = sell_rr_valid
 

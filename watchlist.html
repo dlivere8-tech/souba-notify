@@ -349,11 +349,10 @@ function computeRaw(code, name, dates, highs, lows, closes, volumes) {
   const hvn = calcHVN(dates, closes, volumes, curr);
   const supBuy = isFinite(hvn.sup) && hvn.sup !== -Infinity ? hvn.sup : null;
   const resBuy = isFinite(hvn.res) && hvn.res !== Infinity  ? hvn.res : null;
+  // RR計算：損切はATRベース、利確はHVNベース（買い・売り対称）
   let rrBuy = 0, rrSell = 0;
-  if (supBuy !== null && resBuy !== null && curr !== supBuy && curr !== resBuy) {
-    rrBuy  = Math.abs(resBuy - curr) / Math.abs(curr - supBuy);
-    rrSell = Math.abs(curr - supBuy) / Math.abs(resBuy - curr);
-  }
+  if (resBuy !== null && atr > 0) rrBuy  = Math.abs(resBuy - curr) / atr;
+  if (supBuy !== null && atr > 0) rrSell = Math.abs(curr - supBuy) / atr;
   const pctB = calcBBPctB(closes);
   const rsiSc = rsiScore(rsi);
   return {
@@ -407,10 +406,12 @@ function computeSwingScores(raws) {
     const sellScore = sellTmp + (tentDir === '売り' ? macdPts : 0);
     if (buyScore >= sellScore) {
       r.swingDir = '買い'; r.swingScoreBase = round1(buyScore);
-      r.swingSup = r.supBuy; r.swingRes = r.resBuy;
+      r.swingSup = r.curr - r.atr;  // 損切 = curr - ATR
+      r.swingRes = r.resBuy;        // 利確 = HVN上値
     } else {
       r.swingDir = '売り'; r.swingScoreBase = round1(sellScore);
-      r.swingSup = r.resBuy; r.swingRes = r.supBuy;
+      r.swingSup = r.curr + r.atr;  // 損切 = curr + ATR
+      r.swingRes = r.supBuy;        // 利確 = HVN下値
     }
     r.swingExcluded = false;
   }
