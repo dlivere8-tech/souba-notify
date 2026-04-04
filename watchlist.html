@@ -110,13 +110,10 @@
     .market-banner.none { background: var(--surface2); color: var(--muted); border: 1px solid var(--border); }
     .score-mkt-filtered { font-size: 10px; color: var(--yellow); margin-top: 4px; }
 
-    .sl-tp-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
-    .sl-box { background: rgba(255,69,58,.07); border: 1px solid rgba(255,69,58,.25); border-radius: 8px; padding: 7px 10px; }
-    .tp-box { background: rgba(48,209,88,.07); border: 1px solid rgba(48,209,88,.25); border-radius: 8px; padding: 7px 10px; }
-    .sl-label { font-size: 10px; color: var(--red); text-transform: uppercase; letter-spacing: .04em; }
-    .tp-label { font-size: 10px; color: var(--green); text-transform: uppercase; letter-spacing: .04em; }
-    .sl-val { font-size: 14px; font-weight: 600; color: var(--red); margin-top: 2px; font-variant-numeric: tabular-nums; }
-    .tp-val { font-size: 14px; font-weight: 600; color: var(--green); margin-top: 2px; font-variant-numeric: tabular-nums; }
+    .score-sltp { display: flex; gap: 6px; margin-top: 6px; }
+    .score-sl { font-size: 11px; font-weight: 600; color: var(--red);   font-variant-numeric: tabular-nums; }
+    .score-tp { font-size: 11px; font-weight: 600; color: var(--green); font-variant-numeric: tabular-nums; }
+    .score-sltp-label { font-size: 10px; color: var(--muted); margin-right: 2px; }
 
     .metrics-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 10px; }
     .metric { background: var(--surface2); border-radius: 8px; padding: 7px 10px; }
@@ -772,6 +769,11 @@ function buildCard(code) {
           <span class="score-dir ${dtDirCls}">${r.dtDir}</span>
         </div>
         <div class="score-bar"><div class="score-bar-fill" style="width:${clamp(dtScore)}%;background:${sBg(dtScore)}"></div></div>
+        <div class="score-sltp">
+          <span class="score-sl"><span class="score-sltp-label">SL</span>¥${fmtP(r.dtSup)}</span>
+          <span style="color:var(--border)">|</span>
+          <span class="score-tp"><span class="score-sltp-label">TP</span>¥${fmtP(r.dtRes)}</span>
+        </div>
       </div>
       <div class="score-box">
         <div class="score-label">スイングスコア</div>
@@ -780,17 +782,12 @@ function buildCard(code) {
           <span class="score-dir ${swDirCls}">${r.swingDir}</span>
         </div>
         <div class="score-bar"><div class="score-bar-fill" style="width:${clamp(swScore)}%;background:${sBg(swScore)}"></div></div>
+        <div class="score-sltp">
+          <span class="score-sl"><span class="score-sltp-label">SL</span>¥${fmtP(r.swingSup)}</span>
+          <span style="color:var(--border)">|</span>
+          <span class="score-tp"><span class="score-sltp-label">TP</span>¥${fmtP(r.swingRes)}</span>
+        </div>
         ${swingNote}${mktFilterNote}
-      </div>
-    </div>
-    <div class="sl-tp-row">
-      <div class="sl-box">
-        <div class="sl-label">損切り（デイ・${r.dtDir}）</div>
-        <div class="sl-val">¥${fmtP(r.dtSup)}</div>
-      </div>
-      <div class="tp-box">
-        <div class="tp-label">利確（デイ・${r.dtDir}）</div>
-        <div class="tp-val">¥${fmtP(r.dtRes)}</div>
       </div>
     </div>
     <div class="metrics-grid">
