@@ -367,7 +367,7 @@ def calc_zigzag_trend(df, atr_val, ma75_col='MA75'):
 # ========================================
 def calc_raw(code, name):
     try:
-        df = yf.Ticker(f"{code}.T").history(period="4mo")
+        df = yf.Ticker(f"{code}.T").history(period="6mo")
         if df.empty or len(df) < 20: return None
         df.index = pd.to_datetime(df.index).tz_localize(None)
         df = df.reset_index()
