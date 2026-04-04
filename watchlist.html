@@ -34,57 +34,42 @@
     .btn-sm { padding: 7px 12px; font-size: 13px; border-radius: 7px; }
     .btn-danger { background: rgba(255,69,58,.15); color: var(--red); border: 1px solid rgba(255,69,58,.3); }
 
-    /* ── Tabs ── */
-    .tabs-wrap { margin-bottom: 10px; }
-    .tabs-grid {
-      display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px;
-    }
-    .tab-btn {
+    /* ── Editor Panel ── */
+    .editor-panel {
       background: var(--surface); border: 1px solid var(--border);
-      border-radius: 8px; padding: 6px 4px; cursor: pointer; text-align: center;
-      font-size: 11px; color: var(--muted); line-height: 1.3;
-      -webkit-tap-highlight-color: transparent; transition: all .15s;
-      min-height: 44px; display: flex; flex-direction: column;
-      align-items: center; justify-content: center; gap: 1px;
+      border-radius: var(--r); padding: 12px; margin-bottom: 12px;
     }
-    .tab-btn .tab-num { font-size: 10px; color: var(--muted); }
-    .tab-btn .tab-name {
-      font-size: 11px; font-weight: 600; color: var(--text);
-      max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-      width: 100%;
+    .editor-row { display: flex; gap: 6px; align-items: center; }
+    .slot-select {
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 8px; color: var(--text); padding: 10px 8px;
+      font-size: 14px; -webkit-appearance: none; appearance: none;
+      flex-shrink: 0; width: 72px; text-align: center; cursor: pointer;
     }
-    .tab-btn.empty .tab-name { color: var(--muted); font-weight: 400; }
-    .tab-btn.active { border-color: var(--accent); background: rgba(10,132,255,.12); }
-    .tab-btn.active .tab-num { color: var(--accent); }
-
-    /* ── Selector Panel ── */
-    .selector-panel {
-      background: var(--surface); border: 1px solid var(--border);
-      border-radius: var(--r); padding: 14px; margin-bottom: 12px;
-    }
-    .selector-title {
-      font-size: 12px; color: var(--muted); margin-bottom: 10px;
-      text-transform: uppercase; letter-spacing: .04em;
-    }
-    .search-row { display: flex; gap: 6px; margin-bottom: 8px; }
+    .slot-select:focus { outline: none; border-color: var(--accent); }
+    .search-wrap { flex: 1; position: relative; }
     .search-input {
-      flex: 1; background: var(--surface2); border: 1px solid var(--border);
+      width: 100%; background: var(--surface2); border: 1px solid var(--border);
       border-radius: 8px; color: var(--text); padding: 10px 12px;
       font-size: 16px; -webkit-appearance: none;
     }
     .search-input:focus { outline: none; border-color: var(--accent); }
-    .search-results { max-height: 220px; overflow-y: auto; }
+    .search-dropdown {
+      position: absolute; top: calc(100% + 4px); left: 0; right: 0;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 10px; z-index: 100; max-height: 240px; overflow-y: auto;
+      box-shadow: 0 8px 24px rgba(0,0,0,.4);
+    }
     .search-item {
       display: flex; justify-content: space-between; align-items: center;
-      padding: 10px 8px; border-radius: 8px; cursor: pointer;
-      -webkit-tap-highlight-color: transparent; border: 1px solid transparent;
+      padding: 11px 12px; cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+      border-bottom: 1px solid var(--border);
     }
+    .search-item:last-child { border-bottom: none; }
     .search-item:active { background: var(--surface2); }
-    .search-item.selected { border-color: var(--accent); background: rgba(10,132,255,.1); }
     .search-item-name { font-size: 13px; font-weight: 500; }
-    .search-item-code { font-size: 12px; color: var(--muted); background: var(--surface2); padding: 2px 6px; border-radius: 4px; }
-    .search-empty { font-size: 13px; color: var(--muted); text-align: center; padding: 16px 0; }
-    .selector-footer { display: flex; gap: 8px; margin-top: 10px; }
+    .search-item-code { font-size: 12px; color: var(--muted); background: var(--surface2); padding: 2px 6px; border-radius: 4px; flex-shrink: 0; margin-left: 8px; }
 
     /* ── Cards ── */
     .cards-container { display: flex; flex-direction: column; gap: 10px; }
@@ -131,7 +116,7 @@
     .metric-val { font-size: 14px; font-weight: 600; margin-top: 2px; font-variant-numeric: tabular-nums; }
     .trend-up { color: var(--green); } .trend-down { color: var(--red); }
 
-    .card-ftr { display: flex; justify-content: flex-end; }
+    .card-ftr { display: flex; justify-content: flex-end; padding-top: 4px; border-top: 1px solid var(--border); margin-top: 2px; }
     .err-msg { font-size: 13px; color: var(--red); margin: 4px 0 8px; }
     .empty-card { background: var(--surface); border-radius: var(--r); border: 1px dashed var(--border); padding: 20px; text-align: center; color: var(--muted); font-size: 13px; }
 
@@ -155,26 +140,19 @@
   <button class="btn btn-primary" id="updateAllBtn" onclick="updateAll()">↻ 全更新</button>
 </div>
 
-<!-- Slot tabs -->
-<div class="tabs-wrap">
-  <div class="tabs-grid" id="tabsGrid"></div>
-</div>
-
-<!-- Selector panel (shown when a tab is active) -->
-<div class="selector-panel" id="selectorPanel" style="display:none">
-  <div class="selector-title" id="selectorTitle">スロット X の銘柄を選択</div>
-  <div class="search-row">
-    <input class="search-input" id="searchInput" type="text"
-      placeholder="銘柄名またはコード（例: トヨタ / 7203）"
-      oninput="onSearchInput(this.value)" autocomplete="off">
-  </div>
-  <div class="search-results" id="searchResults">
-    <div class="search-empty">銘柄名またはコードを入力してください</div>
-  </div>
-  <div class="selector-footer">
-    <button class="btn btn-primary btn-sm" id="confirmBtn" onclick="confirmSelection()" disabled>この銘柄を設定 ✓</button>
-    <button class="btn btn-secondary btn-sm" onclick="closeSelector()">キャンセル</button>
-    <button class="btn btn-danger btn-sm" onclick="clearSlot()" id="clearBtn">削除</button>
+<!-- Slot editor -->
+<div class="editor-panel">
+  <div class="editor-row">
+    <select id="slotSelect" class="slot-select" onchange="onSlotChange()"></select>
+    <div class="search-wrap">
+      <input id="searchInput" class="search-input" type="text"
+        placeholder="銘柄名またはコード（例: トヨタ / 7203）"
+        oninput="onSearchInput(this.value)"
+        onfocus="onSearchFocus()" autocomplete="off" autocorrect="off">
+      <div id="searchDropdown" class="search-dropdown" style="display:none"></div>
+    </div>
+    <button class="btn btn-primary btn-sm" id="saveBtn" onclick="saveSlot()">保存</button>
+    <button class="btn btn-danger btn-sm" id="deleteBtn" onclick="deleteSlot()">削除</button>
   </div>
 </div>
 
@@ -199,18 +177,25 @@ const YF_CHART_BASE  = 'https://query2.finance.yahoo.com/v8/finance/chart/';
 const YF_SEARCH_BASE = 'https://query1.finance.yahoo.com/v1/finance/search';
 
 // ─────────────────────────────────────────────
-// N225 stock name map (code → English name)
+// N225 stock name maps
 // ─────────────────────────────────────────────
+// Japanese names (primary display)
+const N225_JP = {"1332":"ニッスイ","1333":"ウミオス","1605":"INPEX","1721":"コムシスHD","1801":"大成建設","1802":"大林組","1803":"清水建設","1808":"長谷工コーポレーション","1812":"鹿島建設","1925":"大和ハウス工業","1928":"積水ハウス","1963":"JGCホールディングス","2002":"日清製粉グループ","2269":"明治ホールディングス","2282":"日本ハム","2413":"エムスリー","2432":"DeNA","2501":"サッポロホールディングス","2502":"アサヒグループHD","2503":"キリンホールディングス","2531":"宝ホールディングス","2579":"コカ・コーラBJH","2587":"サントリー食品インターナショナル","2593":"伊藤園","2695":"くら寿司","2702":"日本マクドナルドHD","2801":"キッコーマン","2802":"味の素","2871":"ニチレイ","2914":"日本たばこ産業","3086":"Jフロントリテイリング","3099":"伊勢丹三越HD","3105":"日清紡HD","3289":"東急不動産HD","3382":"セブン&アイHD","3401":"帝人","3402":"東レ","3405":"クラレ","3407":"旭化成","3436":"SUMCO","3659":"ネクソン","3861":"王子HD","3863":"日本製紙","3941":"レンゴー","4004":"レゾナックHD","4005":"住友化学","4021":"日産化学","4042":"東ソー","4043":"トクヤマ","4061":"デンカ","4063":"信越化学工業","4151":"協和キリン","4183":"三井化学","4188":"三菱ケミカルグループ","4208":"UBE","4324":"電通グループ","4452":"花王","4502":"武田薬品工業","4503":"アステラス製薬","4506":"住友ファーマ","4507":"塩野義製薬","4519":"中外製薬","4523":"エーザイ","4543":"テルモ","4568":"第一三共","4578":"大塚HD","4631":"DIC","4642":"オリジナル工学","4689":"LYコーポレーション","4704":"トレンドマイクロ","4751":"サイバーエージェント","4755":"楽天グループ","4901":"富士フイルムHD","4902":"コニカミノルタ","4911":"資生堂","5020":"ENEOSホールディングス","5101":"横浜ゴム","5105":"TOYO TIRE","5108":"ブリヂストン","5110":"住友ゴム工業","5201":"AGC","5202":"日本板硝子","5214":"日本電気硝子","5232":"住友大阪セメント","5233":"太平洋セメント","5301":"東海カーボン","5332":"TOTO","5333":"日本ガイシ","5401":"日本製鉄","5406":"神戸製鋼所","5411":"JFEホールディングス","5423":"東京製鐵","5631":"日本製鋼所","5703":"日本軽金属HD","5706":"三井金属鉱業","5707":"東邦亜鉛","5711":"三菱マテリアル","5713":"住友金属鉱山","5714":"DOWAホールディングス","5715":"古河機械金属","5726":"大阪チタニウムテクノロジーズ","5727":"東邦チタニウム","5801":"古河電気工業","5802":"住友電気工業","5803":"フジクラ","5901":"東洋製罐グループHD","6098":"リクルートHD","6103":"オークマ","6113":"アマダ","6146":"ディスコ","6178":"日本郵政","6273":"SMC","6301":"コマツ","6302":"住友重機械工業","6305":"日立建機","6326":"クボタ","6361":"荏原製作所","6367":"ダイキン工業","6368":"オルガノ","6369":"東洋カーネクスト","6370":"栗田工業","6471":"日本精工","6472":"NTN","6473":"ジェイテクト","6501":"日立製作所","6503":"三菱電機","6504":"富士電機","6506":"安川電機","6508":"明電舎","6586":"マキタ","6594":"ニデック","6645":"オムロン","6647":"盛岡電機工業","6674":"GSユアサ","6701":"NEC","6702":"富士通","6703":"沖電気工業","6706":"電気興業","6724":"セイコーエプソン","6752":"パナソニックHD","6753":"シャープ","6758":"ソニーグループ","6762":"TDK","6770":"アルプスアルパイン","6841":"横河電機","6857":"アドバンテスト","6861":"キーエンス","6902":"デンソー","6952":"カシオ計算機","6954":"ファナック","6971":"京セラ","6976":"太陽誘電","6981":"村田製作所","6988":"日東電工","7003":"三井E&S","7004":"カナデビア","7011":"三菱重工業","7012":"川崎重工業","7013":"IHI","7182":"ゆうちょ銀行","7186":"横浜銀行FG","7201":"日産自動車","7202":"いすゞ自動車","7203":"トヨタ自動車","7205":"日野自動車","7211":"三菱自動車工業","7261":"マツダ","7267":"本田技研工業","7269":"スズキ","7270":"SUBARU","7272":"ヤマハ発動機","7731":"ニコン","7733":"オリンパス","7735":"SCREENホールディングス","7741":"HOYA","7751":"キヤノン","7752":"リコー","7762":"シチズン時計","7832":"バンダイナムコHD","7911":"TOPPANホールディングス","7912":"大日本印刷","7974":"任天堂","8001":"伊藤忠商事","8002":"丸紅","8015":"豊田通商","8031":"三井物産","8035":"東京エレクトロン","8053":"住友商事","8058":"三菱商事","8233":"高島屋","8252":"丸井グループ","8267":"イオン","8304":"あおぞら銀行","8306":"三菱UFJフィナンシャルG","8308":"りそなHD","8309":"三井住友トラストGHD","8316":"三井住友フィナンシャルG","8411":"みずほフィナンシャルG","8591":"オリックス","8601":"大和証券グループ","8604":"野村ホールディングス","8630":"SOMPOホールディングス","8697":"日本取引所グループ","8725":"MS&ADインシュアランスG","8750":"第一生命HD","8766":"東京海上HD","8795":"T&Dホールディングス","9001":"東武鉄道","9005":"東急","9007":"小田急電鉄","9008":"京王電鉄","9009":"京成電鉄","9020":"東日本旅客鉄道","9021":"西日本旅客鉄道","9022":"東海旅客鉄道","9064":"ヤマトホールディングス","9101":"日本郵船","9104":"商船三井","9107":"川崎汽船","9202":"ANAホールディングス","9301":"三菱倉庫","9412":"スカパーJSATHD","9432":"日本電信電話","9433":"KDDI","9434":"ソフトバンク","9501":"東京電力HD","9502":"中部電力","9503":"関西電力","9531":"東京ガス","9532":"大阪ガス","9602":"東宝","9616":"共立メンテナンス","9735":"セコム","9766":"コナミグループ","9983":"ファーストリテイリング","9984":"ソフトバンクグループ"};
+// English names (fallback for search)
 const N225_NAMES = {"1332":"NISSUI CORP","1333":"UMIOS CORP","1605":"INPEX CORP","1721":"COMSYS HOLDINGS","1801":"TAISEI CORP","1802":"OBAYASHI CORP","1803":"SHIMIZU CORP","1808":"HASEKO CORP","1812":"KAJIMA CORP","1925":"DAIWA HOUSE","1928":"SEKISUI HOUSE","1963":"JGC HOLDINGS","2002":"NISSHIN SEIFUN","2269":"MEIJI HOLDINGS","2282":"NH FOODS","2413":"M3 INC","2432":"DENA","2501":"SAPPORO HOLDINGS","2502":"ASAHI GROUP","2503":"KIRIN HOLDINGS","2531":"TAKARA HOLDINGS","2579":"COCA-COLA BOTTLERS JP","2587":"SUNTORY BEV & FOOD","2593":"ITO EN","2695":"KURA SUSHI","2702":"MCDONALD'S JP","2801":"KIKKOMAN","2802":"AJINOMOTO","2871":"NICHIREI","2914":"JAPAN TOBACCO","3086":"J.FRONT RETAILING","3099":"ISETAN MITSUKOSHI","3105":"NISSHINBO","3289":"TOKYU FUDOSAN","3382":"SEVEN & I HOLDINGS","3401":"TEIJIN","3402":"TORAY INDUSTRIES","3405":"KURARAY","3407":"ASAHI KASEI","3436":"SUMCO","3659":"NEXON","3861":"OJI HOLDINGS","3863":"NIPPON PAPER IND","3941":"RENGO","4004":"RESONAC HOLDINGS","4005":"SUMITOMO CHEMICAL","4021":"NISSAN CHEMICAL","4042":"TOSOH","4043":"TOKUYAMA","4061":"DENKA","4063":"SHIN-ETSU CHEMICAL","4151":"KYOWA KIRIN","4183":"MITSUI CHEMICALS","4188":"MITSUBISHI CHEMICAL","4208":"UBE CORP","4324":"DENTSU GROUP","4452":"KAO","4502":"TAKEDA PHARMACEUTICAL","4503":"ASTELLAS PHARMA","4506":"SUMITOMO PHARMA","4507":"SHIONOGI","4519":"CHUGAI PHARMACEUTICAL","4523":"EISAI","4543":"TERUMO","4568":"DAIICHI SANKYO","4578":"OTSUKA HOLDINGS","4631":"DIC CORP","4642":"ORIGINAL ENGINEERING","4689":"LY CORP","4704":"TREND MICRO","4751":"CYBERAGENT","4755":"RAKUTEN GROUP","4901":"FUJIFILM HOLDINGS","4902":"KONICA MINOLTA","4911":"SHISEIDO","5020":"ENEOS HOLDINGS","5101":"YOKOHAMA RUBBER","5105":"TOYO TIRE","5108":"BRIDGESTONE","5110":"SUMITOMO RUBBER","5201":"AGC","5202":"NIPPON SHEET GLASS","5214":"NIPPON ELECTRIC GLASS","5232":"SUMITOMO OSAKA CEMENT","5233":"TAIHEIYO CEMENT","5301":"TOKAI CARBON","5332":"TOTO","5333":"NGK INSULATORS","5401":"NIPPON STEEL","5406":"KOBE STEEL","5411":"JFE HOLDINGS","5423":"TOKYO STEEL MFG","5631":"JAPAN STEEL WORKS","5703":"NIPPON LIGHT METAL","5706":"MITSUI KINZOKU","5707":"TOHO ZINC","5711":"MITSUBISHI MATERIALS","5713":"SUMITOMO METAL MINING","5714":"DOWA HOLDINGS","5715":"FURUKAWA","5726":"OSAKA TITANIUM TECH","5727":"TOHO TITANIUM","5801":"FURUKAWA ELECTRIC","5802":"SUMITOMO ELECTRIC","5803":"FUJIKURA","5901":"TOYO SEIKAN GROUP","6098":"RECRUIT HOLDINGS","6103":"OKUMA","6113":"AMADA","6146":"DISCO","6178":"JAPAN POST HOLDINGS","6273":"SMC","6301":"KOMATSU","6302":"SUMITOMO HEAVY IND","6305":"HITACHI CONST MACH","6326":"KUBOTA","6361":"EBARA","6367":"DAIKIN INDUSTRIES","6368":"ORGANO","6369":"TOYO KANETSU","6370":"KURITA WATER IND","6471":"NSK","6472":"NTN","6473":"JTEKT","6501":"HITACHI","6503":"MITSUBISHI ELECTRIC","6504":"FUJI ELECTRIC","6506":"YASKAWA ELECTRIC","6508":"MEIDENSHA","6586":"MAKITA","6594":"NIDEC","6645":"OMRON","6647":"MORIO DENKI","6674":"GS YUASA","6701":"NEC","6702":"FUJITSU","6703":"OKI ELECTRIC","6706":"DKK","6724":"SEIKO EPSON","6752":"PANASONIC HOLDINGS","6753":"SHARP","6758":"SONY GROUP","6762":"TDK","6770":"ALPS ALPINE","6841":"YOKOGAWA ELECTRIC","6857":"ADVANTEST","6861":"KEYENCE","6902":"DENSO","6952":"CASIO COMPUTER","6954":"FANUC","6971":"KYOCERA","6976":"TAIYO YUDEN","6981":"MURATA MANUFACTURING","6988":"NITTO DENKO","7003":"MITSUI E&S","7004":"KANADEVIA","7011":"MITSUBISHI HEAVY IND","7012":"KAWASAKI HEAVY IND","7013":"IHI","7182":"JAPAN POST BANK","7186":"YOKOHAMA FINANCIAL","7201":"NISSAN MOTOR","7202":"ISUZU MOTORS","7203":"TOYOTA MOTOR","7205":"HINO MOTORS","7211":"MITSUBISHI MOTORS","7261":"MAZDA MOTOR","7267":"HONDA MOTOR","7269":"SUZUKI MOTOR","7270":"SUBARU","7272":"YAMAHA MOTOR","7731":"NIKON","7733":"OLYMPUS","7735":"SCREEN HOLDINGS","7741":"HOYA","7751":"CANON","7752":"RICOH","7762":"CITIZEN WATCH","7832":"BANDAI NAMCO","7911":"TOPPAN HOLDINGS","7912":"DAI NIPPON PRINTING","7974":"NINTENDO","8001":"ITOCHU","8002":"MARUBENI","8015":"TOYOTA TSUSHO","8031":"MITSUI & CO","8035":"TOKYO ELECTRON","8053":"SUMITOMO CORP","8058":"MITSUBISHI CORP","8233":"TAKASHIMAYA","8252":"MARUI GROUP","8267":"AEON","8304":"AOZORA BANK","8306":"MITSUBISHI UFJ FG","8308":"RESONA HOLDINGS","8309":"SMTG","8316":"SMFG","8411":"MIZUHO FINANCIAL","8591":"ORIX","8601":"DAIWA SECURITIES","8604":"NOMURA HOLDINGS","8630":"SOMPO HOLDINGS","8697":"JAPAN EXCHANGE GROUP","8725":"MS&AD INSURANCE","8750":"DAI-ICHI LIFE","8766":"TOKIO MARINE","8795":"T&D HOLDINGS","9001":"TOBU RAILWAY","9005":"TOKYU","9007":"ODAKYU ELECTRIC","9008":"KEIO","9009":"KEISEI ELECTRIC","9020":"JR EAST","9021":"JR WEST","9022":"JR CENTRAL","9064":"YAMATO HOLDINGS","9101":"NYK LINE","9104":"MOL","9107":"K LINE","9202":"ANA HOLDINGS","9301":"MITSUBISHI LOGISTICS","9412":"SKY PERFECT JSAT","9432":"NTT","9433":"KDDI","9434":"SOFTBANK CORP","9501":"TEPCO","9502":"CHUBU ELECTRIC","9503":"KANSAI ELECTRIC","9531":"TOKYO GAS","9532":"OSAKA GAS","9602":"TOHO","9616":"KYORITSU MAINTENANCE","9735":"SECOM","9766":"KONAMI GROUP","9983":"FAST RETAILING","9984":"SOFTBANK GROUP"};
-const N225_CODES = Object.keys(N225_NAMES);
+const N225_CODES = Object.keys(N225_JP);
+
+// Return display name: JP name > fetched name > EN name > code
+function stockName(code) {
+  return N225_JP[code] || stockResults[code]?.raw?.name || N225_NAMES[code] || code;
+}
 
 // ─────────────────────────────────────────────
 // State
 // ─────────────────────────────────────────────
 let tickers      = [...DEFAULT_TICKERS];
 let stockResults = {};   // code → { raw, shinyo, shinyoLoading, error, loading }
-let activeTab    = -1;   // currently open tab index (-1 = none)
-let pendingCode  = null; // code selected in search but not yet confirmed
+let pendingCode  = null; // code highlighted in search dropdown
 let isUpdating   = false;
 
 // ─────────────────────────────────────────────
@@ -607,7 +592,7 @@ function renderCards() {
   const active = tickers.filter(t => t.trim() !== '');
   if (!active.length) {
     document.getElementById('cardsContainer').innerHTML =
-      '<div class="empty-card">上のタブから銘柄を設定してください</div>';
+      '<div class="empty-card">銘柄を設定してください</div>';
     return;
   }
   document.getElementById('cardsContainer').innerHTML = active.map(buildCard).join('');
@@ -666,13 +651,13 @@ function buildCard(code) {
 
   const swingNote = r.swingExcluded
     ? `<div class="score-excluded">⚠ 前日比±3%超・選出除外</div>`
-    : `<div class="score-note">※参考値（メールと異なる場合あり）</div>`;
+    : '';
 
   return `<div class="stock-card" id="card-${code}">
     <div class="card-hdr">
       <div>
         <div class="stock-code">${code}</div>
-        <div class="stock-name">${r.name}</div>
+        <div class="stock-name">${stockName(code)}</div>
       </div>
       <div class="price-block">
         <div class="price-val">¥${fmtP(r.curr)}</div>
@@ -687,7 +672,6 @@ function buildCard(code) {
           <span class="score-dir ${dtDirCls}">${r.dtDir}</span>
         </div>
         <div class="score-bar"><div class="score-bar-fill" style="width:${clamp(dtScore)}%;background:${sBg(dtScore)}"></div></div>
-        <div class="score-note">※参考値（メールと異なる場合あり）</div>
       </div>
       <div class="score-box">
         <div class="score-label">スイングスコア</div>
@@ -735,111 +719,107 @@ function updateLastUpdated() {
 }
 
 // ─────────────────────────────────────────────
-// Tab Management
+// Slot Editor (dropdown + search input)
 // ─────────────────────────────────────────────
-function renderTabs() {
-  const grid = document.getElementById('tabsGrid');
-  grid.innerHTML = tickers.map((code, i) => {
-    const name  = code.trim() ? (stockResults[code]?.raw?.name || N225_NAMES[code] || code) : '---';
-    const isSet = code.trim() !== '';
-    const isSel = i === activeTab;
-    return `<button class="tab-btn ${isSet ? '' : 'empty'} ${isSel ? 'active' : ''}"
-        onclick="selectTab(${i})">
-      <span class="tab-num">${i + 1}</span>
-      <span class="tab-name">${isSet ? name : '---'}</span>
-    </button>`;
+function renderSlotSelect() {
+  const sel = document.getElementById('slotSelect');
+  sel.innerHTML = tickers.map((code, i) => {
+    const label = code.trim() ? `${i+1}. ${stockName(code)}` : `${i+1}. ---`;
+    return `<option value="${i}">${label}</option>`;
   }).join('');
+  // Sync input to current slot
+  syncInputToSlot();
 }
 
-function selectTab(i) {
-  if (activeTab === i) {
-    // Toggle off
-    activeTab = -1;
-    document.getElementById('selectorPanel').style.display = 'none';
-    renderTabs();
-    return;
-  }
-  activeTab = i;
-  pendingCode = tickers[i].trim() || null;
-  renderTabs();
-  openSelector(i);
-}
-
-function openSelector(i) {
-  const code = tickers[i].trim();
-  document.getElementById('selectorTitle').textContent = `スロット ${i + 1} の銘柄を選択`;
-  const input = document.getElementById('searchInput');
-  input.value = code || '';
-  pendingCode = code || null;
-  updateConfirmBtn();
-
-  // Show initial search results
-  if (code) {
-    showLocalSearch(code);
-  } else {
-    document.getElementById('searchResults').innerHTML =
-      '<div class="search-empty">銘柄名またはコードを入力してください</div>';
-  }
-
-  document.getElementById('selectorPanel').style.display = 'block';
-  document.getElementById('clearBtn').style.display = code ? '' : 'none';
-  // Scroll to panel
-  document.getElementById('selectorPanel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  setTimeout(() => input.focus(), 100);
-}
-
-function closeSelector() {
-  activeTab = -1;
+function onSlotChange() {
   pendingCode = null;
-  document.getElementById('selectorPanel').style.display = 'none';
-  renderTabs();
+  closeDropdown();
+  syncInputToSlot();
 }
 
-function clearSlot() {
-  if (activeTab < 0) return;
-  const code = tickers[activeTab];
-  tickers[activeTab] = '';
+function syncInputToSlot() {
+  const i = getCurrentSlotIdx();
+  const code = tickers[i].trim();
+  const input = document.getElementById('searchInput');
+  input.value = code ? `${code} ${stockName(code)}` : '';
+  pendingCode = code || null;
+}
+
+function getCurrentSlotIdx() {
+  return parseInt(document.getElementById('slotSelect').value, 10) || 0;
+}
+
+function saveSlot() {
+  const i = getCurrentSlotIdx();
+  const code = pendingCode;
+  if (!code) return;
+  const oldCode = tickers[i];
+  tickers[i] = code;
+  saveTickers();
+  renderSlotSelect();
+  closeDropdown();
+  updateSingle(code).then(() => {
+    if (oldCode && oldCode !== code && !tickers.includes(oldCode)) delete stockResults[oldCode];
+    renderCards();
+  });
+}
+
+function deleteSlot() {
+  const i = getCurrentSlotIdx();
+  const code = tickers[i];
+  tickers[i] = '';
   if (code) delete stockResults[code];
   saveTickers();
-  closeSelector();
+  renderSlotSelect();
+  closeDropdown();
   renderCards();
 }
 
+function closeDropdown() {
+  document.getElementById('searchDropdown').style.display = 'none';
+}
+
 // ─────────────────────────────────────────────
-// Search
+// Search (inline dropdown)
 // ─────────────────────────────────────────────
 let _searchTimer = null;
+
+function onSearchFocus() {
+  const q = document.getElementById('searchInput').value.trim();
+  if (q) showDropdown(q);
+}
 
 function onSearchInput(val) {
   clearTimeout(_searchTimer);
   pendingCode = null;
-  updateConfirmBtn();
   const q = val.trim();
-  if (!q) {
-    document.getElementById('searchResults').innerHTML =
-      '<div class="search-empty">銘柄名またはコードを入力してください</div>';
-    return;
-  }
-  // Show local results instantly
-  showLocalSearch(q);
-  // Debounce remote search
-  _searchTimer = setTimeout(() => doRemoteSearch(q), 500);
+  if (!q) { closeDropdown(); return; }
+  // Show local N225 results instantly
+  showDropdown(q);
+  // Debounce remote search for non-Japanese queries
+  _searchTimer = setTimeout(() => doRemoteSearch(q), 600);
 }
 
-function showLocalSearch(q) {
+function showDropdown(q) {
   const ql = q.toLowerCase();
   const matches = N225_CODES.filter(code => {
-    if (code.includes(q)) return true;
-    const name = (N225_NAMES[code] || '').toLowerCase();
-    return name.includes(ql);
+    if (code.startsWith(q)) return true;
+    const jp = (N225_JP[code] || '').toLowerCase();
+    const en = (N225_NAMES[code] || '').toLowerCase();
+    return jp.includes(ql) || en.includes(ql);
   }).slice(0, 12);
 
-  if (!matches.length) {
-    document.getElementById('searchResults').innerHTML =
-      '<div class="search-empty">候補なし（リモート検索中...）</div>';
-    return;
-  }
-  renderSearchItems(matches.map(code => ({ code, name: N225_NAMES[code] || code })));
+  const dd = document.getElementById('searchDropdown');
+  if (!matches.length) { dd.style.display = 'none'; return; }
+
+  dd.innerHTML = matches.map(code => {
+    const name = N225_JP[code] || N225_NAMES[code] || code;
+    return `<div class="search-item" onclick="selectItem('${code}')">
+      <span class="search-item-name">${name}</span>
+      <span class="search-item-code">${code}</span>
+    </div>`;
+  }).join('');
+  dd.style.display = 'block';
 }
 
 async function doRemoteSearch(q) {
@@ -853,59 +833,30 @@ async function doRemoteSearch(q) {
       q.symbol && (q.symbol.endsWith('.T') || q.exchange === 'TKY' || q.exchange === 'OSA')
     );
     if (!quotes.length) return;
-    const items = quotes.slice(0, 8).map(q => ({
-      code: q.symbol.replace('.T', ''),
-      name: q.shortname || q.longname || q.symbol.replace('.T', '')
-    }));
-    renderSearchItems(items);
-  } catch {
-    // Keep local results
-  }
+    // Merge with local results (remote fills gaps for non-N225)
+    const dd = document.getElementById('searchDropdown');
+    const existing = new Set([...dd.querySelectorAll('.search-item-code')].map(el => el.textContent));
+    const newItems = quotes.slice(0, 8)
+      .map(q => ({ code: q.symbol.replace('.T',''), name: q.shortname || q.longname || q.symbol.replace('.T','') }))
+      .filter(({ code }) => !existing.has(code))
+      .slice(0, 4);
+    if (!newItems.length) return;
+    newItems.forEach(({ code, name }) => {
+      const div = document.createElement('div');
+      div.className = 'search-item';
+      div.onclick = () => selectItem(code);
+      div.innerHTML = `<span class="search-item-name">${name}</span><span class="search-item-code">${code}</span>`;
+      dd.appendChild(div);
+    });
+    dd.style.display = 'block';
+  } catch { /* keep local results */ }
 }
 
-function renderSearchItems(items) {
-  if (!items.length) {
-    document.getElementById('searchResults').innerHTML = '<div class="search-empty">候補なし</div>';
-    return;
-  }
-  document.getElementById('searchResults').innerHTML = items.map(({ code, name }) => {
-    const isSel = code === pendingCode;
-    return `<div class="search-item ${isSel ? 'selected' : ''}" onclick="selectSearchItem('${code}', ${JSON.stringify(name)})">
-      <span class="search-item-name">${name}</span>
-      <span class="search-item-code">${code}</span>
-    </div>`;
-  }).join('');
-}
-
-function selectSearchItem(code, name) {
+function selectItem(code) {
   pendingCode = code;
-  updateConfirmBtn();
-  // Re-render to show selected state
-  const items = document.querySelectorAll('.search-item');
-  items.forEach(el => {
-    const c = el.querySelector('.search-item-code')?.textContent;
-    el.classList.toggle('selected', c === code);
-  });
-}
-
-function updateConfirmBtn() {
-  document.getElementById('confirmBtn').disabled = !pendingCode;
-}
-
-function confirmSelection() {
-  if (!pendingCode || activeTab < 0) return;
-  const oldCode = tickers[activeTab];
-  tickers[activeTab] = pendingCode;
-  saveTickers();
-  closeSelector();
-  // Auto-fetch the newly set stock
-  updateSingle(pendingCode).then(() => {
-    // If old code is no longer in the list, clean up
-    if (oldCode && oldCode !== pendingCode && !tickers.includes(oldCode)) {
-      delete stockResults[oldCode];
-    }
-    renderCards();
-  });
+  const name = stockName(code);
+  document.getElementById('searchInput').value = `${code} ${name}`;
+  closeDropdown();
 }
 
 // ─────────────────────────────────────────────
@@ -935,8 +886,12 @@ function sBg(s)    { return s >= 70 ? 'var(--green)' : s >= 50 ? 'var(--yellow)'
       if (Array.isArray(p) && p.length === 10) tickers = p;
     }
   } catch {}
-  renderTabs();
+  renderSlotSelect();
   renderCards();
+  // Close dropdown when clicking outside the search area
+  document.addEventListener('click', e => {
+    if (!e.target.closest('.search-wrap')) closeDropdown();
+  });
 })();
 </script>
 </body>
