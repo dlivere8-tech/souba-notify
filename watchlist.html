@@ -768,12 +768,14 @@ function updateLastUpdated() {
 // ─────────────────────────────────────────────
 // Slot Editor (dropdown + search input)
 // ─────────────────────────────────────────────
-function renderSlotSelect() {
+function renderSlotSelect(keepIdx) {
   const sel = document.getElementById('slotSelect');
+  const cur = keepIdx !== undefined ? keepIdx : (parseInt(sel.value, 10) || 0);
   sel.innerHTML = tickers.map((code, i) => {
     const label = code.trim() ? `${i+1}. ${stockName(code)}` : `${i+1}. ---`;
     return `<option value="${i}">${label}</option>`;
   }).join('');
+  sel.value = cur;
   // Sync input to current slot
   syncInputToSlot();
 }
@@ -828,7 +830,7 @@ function deleteSlot() {
   tickers[i] = '';
   if (code) delete stockResults[code];
   saveTickers();
-  renderSlotSelect();
+  renderSlotSelect(i);
   closeDropdown();
   renderCards();
 }
