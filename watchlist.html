@@ -401,11 +401,12 @@ function rankScore(values, higherIsBetter, maxPts) {
 }
 
 function rsiScore(rsi) {
-  if      (rsi >= 40 && rsi <= 60) return { buy: 30, sell: 30 };
-  else if (rsi >= 30 && rsi <  40) return { buy: 24, sell: 12 };
-  else if (rsi >  60 && rsi <= 70) return { buy: 12, sell: 24 };
-  else if (rsi <  30)              return { buy: 30, sell:  0 };
-  else                             return { buy:  0, sell: 30 }; // > 70
+  // NEW配点: RSI35pt max（souba.pyと同一）
+  if      (rsi >= 40 && rsi <= 60) return { buy: 35, sell: 35 };
+  else if (rsi >= 30 && rsi <  40) return { buy: 28, sell: 14 };
+  else if (rsi >  60 && rsi <= 70) return { buy: 14, sell: 28 };
+  else if (rsi <  30)              return { buy: 35, sell:  0 };
+  else                             return { buy:  0, sell: 35 }; // > 70
 }
 
 /**
@@ -479,26 +480,41 @@ function computeRaw(code, name, dates, highs, lows, closes, volumes) {
  * Sets r.swingDir, r.swingScoreBase, r.swingSup, r.swingRes.
  */
 function computeSwingScores(raws) {
-  const n = raws.length;
+  // ルール2: 前日比±3%超は急騰・急落銘柄として除外（souba.pyと同一）
+  const eligible = raws.filter(r => Math.abs(r.changePct) <= 3.0);
+  const excluded = raws.filter(r => Math.abs(r.changePct) >  3.0);
+
+  // 除外銘柄はスイングスコア0・方向は前日比で仮設定
+  for (const r of excluded) {
+    r.swingDir       = r.changePct >= 0 ? '買い' : '売り';
+    r.swingScoreBase = 0;
+    r.swingSup       = r.supBuy;
+    r.swingRes       = r.resBuy;
+    r.swingExcluded  = true;
+  }
+
+  const n = eligible.length;
   if (n === 0) return;
 
-  const maDivs  = raws.map(r => r.maDiv);
-  const rrBuys  = raws.map(r => r.rrBuyRaw);
-  const rrSells = raws.map(r => r.rrSellRaw);
+  const rrBuys  = eligible.map(r => r.rrBuyRaw);
+  const rrSells = eligible.map(r => r.rrSellRaw);
 
-  const buyTrend  = rankScore(maDivs,  true,  35);
-  const sellTrend = rankScore(maDivs,  false, 35);
-  const buyRR     = rankScore(rrBuys,  true,  15);
-  const sellRR    = rankScore(rrSells, true,  15);
+  // NEW配点: トレンド20pt絶対評価（MA25>MA75なら買い20、売り0）
+  const buyRR  = rankScore(rrBuys,  true, 15);
+  const sellRR = rankScore(rrSells, true, 15);
 
   for (let i = 0; i < n; i++) {
-    const r    = raws[i];
+    const r    = eligible[i];
+    // 絶対トレンド評価
+    const buyTrendSc  = r.maDiv > 0 ? 20 : 0;
+    const sellTrendSc = r.maDiv > 0 ?  0 : 20;
     const pctB = r.pctB;
-    const buyBB  = pctB !== null ? Math.max(0, round1((1 - pctB) * 10)) : 0;
-    const sellBB = pctB !== null ? Math.max(0, round1(pctB * 10))        : 0;
+    // NEW配点: %B20pt
+    const buyBB  = pctB !== null ? Math.max(0, round1((1 - pctB) * 20)) : 0;
+    const sellBB = pctB !== null ? Math.max(0, round1(pctB * 20))        : 0;
 
-    const buyTmp  = buyTrend[i]  + r.buyRsiScore  + buyRR[i]  + buyBB;
-    const sellTmp = sellTrend[i] + r.sellRsiScore + sellRR[i] + sellBB;
+    const buyTmp  = buyTrendSc  + r.buyRsiScore  + buyRR[i]  + buyBB;
+    const sellTmp = sellTrendSc + r.sellRsiScore + sellRR[i] + sellBB;
     const tentDir = buyTmp >= sellTmp ? '買い' : '売り';
 
     const { macd, signal } = calcMACDLines(r._closes);
@@ -832,7 +848,9 @@ function buildCard(code) {
         <div class="score-bar">
           <div class="score-bar-fill" style="width:${clamp(swScore)}%;background:${sBg(swScore)}"></div>
         </div>
-        <div class="score-note">※参考値（メールと異なる場合あり）</div>
+        ${r.swingExcluded
+          ? '<div class="score-note" style="color:var(--red)">⚠ 前日比±3%超のため選出除外</div>'
+          : '<div class="score-note">※参考値（メールと異なる場合あり）</div>'}
       </div>
     </div>
 
