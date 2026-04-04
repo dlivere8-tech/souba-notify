@@ -133,7 +133,11 @@ def _macd_lines(closes):
     return macd_full[8:], signal
 
 
-def calc_hvn(df, curr, bins=20):
+def calc_hvn(df, curr, bins=20, atr=None, atr_mult=2.0, fallback_mult=3.0):
+    """
+    atr指定時: curr±ATR×atr_mult 以上離れたHVNを選択。
+              該当HVNなし→ curr±ATR×fallback_mult をフォールバック目標とする。
+    """
     try:
         closes  = df['Close'].values.astype(float)
         volumes = df['Volume'].values.astype(float)
@@ -152,8 +156,15 @@ def calc_hvn(df, curr, bins=20):
         top5  = vol_by_bin.nlargest(5).index
         hvn   = sorted([bcenters[int(i)] for i in top5 if int(i) < len(bcenters)])
 
-        sup = max([p for p in hvn if p < curr], default=None)
-        res = min([p for p in hvn if p > curr], default=None)
+        if atr and atr > 0:
+            min_dist = atr * atr_mult
+            sup = max([p for p in hvn if p <= curr - min_dist], default=None)
+            res = min([p for p in hvn if p >= curr + min_dist], default=None)
+            if sup is None: sup = curr - atr * fallback_mult
+            if res is None: res = curr + atr * fallback_mult
+        else:
+            sup = max([p for p in hvn if p < curr], default=None)
+            res = min([p for p in hvn if p > curr], default=None)
         return sup, res
     except Exception:
         return None, None
@@ -210,7 +221,7 @@ def calc_indicators(df):
         pct_b   = _bb_pctb(closes)
 
         # HVN（ATRベース損切・HVNベース利確）
-        sup_p, res_p = calc_hvn(df, curr)
+        sup_p, res_p = calc_hvn(df, curr, atr=atr_val)
         rr_buy = rr_sell = 0.0
         if res_p is not None and atr_val > 0:
             rr_buy  = abs(res_p - curr) / atr_val

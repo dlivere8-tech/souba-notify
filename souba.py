@@ -225,10 +225,12 @@ print(f"上位50銘柄選出完了")
 # ========================================
 # HVN計算（改善①：ビン20・直近1ヶ月×2重み）
 # ========================================
-def calc_hvn(df, curr):
+def calc_hvn(df, curr, atr=None, atr_mult=2.0, fallback_mult=3.0):
     """
     ビン数20に増加、直近1ヶ月データに×2の重みをつけてHVNを算出。
-    戻り値: (sup_price, res_price) または (None, None)
+    atr指定時: curr±ATR×atr_mult 以上離れたHVNを選択。
+              該当HVNなし→ curr±ATR×fallback_mult をフォールバック目標とする。
+    戻り値: (sup_price, res_price)
     """
     try:
         cutoff = df['Date'].max() - pd.Timedelta(days=30)
@@ -244,8 +246,15 @@ def calc_hvn(df, curr):
         top5       = vol_by_bin.nlargest(5).index
         hvn        = sorted([bin_centers[i] for i in top5 if i < len(bin_centers)])
 
-        sup = max([p for p in hvn if p < curr], default=None)
-        res = min([p for p in hvn if p > curr], default=None)
+        if atr and atr > 0:
+            min_dist = atr * atr_mult
+            sup = max([p for p in hvn if p <= curr - min_dist], default=None)
+            res = min([p for p in hvn if p >= curr + min_dist], default=None)
+            if sup is None: sup = curr - atr * fallback_mult
+            if res is None: res = curr + atr * fallback_mult
+        else:
+            sup = max([p for p in hvn if p < curr], default=None)
+            res = min([p for p in hvn if p > curr], default=None)
         return sup, res
     except:
         return None, None
@@ -409,7 +418,7 @@ def calc_raw(code, name):
         # ========================================
         # スイング用HVN（改善①）
         # ========================================
-        sup_buy_p, res_buy_p = calc_hvn(df, curr)
+        sup_buy_p, res_buy_p = calc_hvn(df, curr, atr=atr_val)
 
         # RR計算：損切はATRベース、利確はHVNベース
         # 買い: 利確=HVN上値、損切=curr-ATR
