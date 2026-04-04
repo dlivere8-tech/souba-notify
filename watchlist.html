@@ -430,31 +430,12 @@ function _timeoutSignal(ms) {
   return ctrl.signal;
 }
 
-// Fetch targetUrl via CORS proxy.
-// Tries allorigins.win/raw first, falls back to allorigins.win/get (JSON-wrapped).
-// Returns { text(), json() } like a Response.
-async function proxyFetch(targetUrl, timeoutMs = 20000) {
-  const encoded = encodeURIComponent(targetUrl);
-
-  // --- Attempt 1: allorigins.win/raw (returns raw body) ---
-  try {
-    const res = await fetch(
-      'https://api.allorigins.win/raw?url=' + encoded,
-      { signal: _timeoutSignal(timeoutMs) }
-    );
-    if (res.ok) return res;  // native Response — .text() / .json() work as-is
-  } catch { /* fall through */ }
-
-  // --- Attempt 2: allorigins.win/get (returns { contents: "..." }) ---
-  const res2 = await fetch(
-    'https://api.allorigins.win/get?url=' + encoded,
-    { signal: _timeoutSignal(timeoutMs) }
-  );
-  if (!res2.ok) throw new Error(`プロキシHTTP ${res2.status}`);
-  const wrapped = await res2.json();
+// Wrap allorigins.win/get response into a Response-like object
+async function _wrapGetResponse(res) {
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const wrapped = await res.json();
   const body = wrapped.contents;
-  if (!body) throw new Error('プロキシ空レスポンス');
-  // Return a thin wrapper with the same .text() / .json() interface
+  if (!body) throw new Error('空レスポンス');
   return {
     ok: true,
     text: () => Promise.resolve(body),
@@ -462,12 +443,34 @@ async function proxyFetch(targetUrl, timeoutMs = 20000) {
   };
 }
 
+// Race 3 proxies: corsproxy.io, allorigins/raw, allorigins/get (delayed).
+// Returns the first successful Response-like object.
+async function proxyFetch(targetUrl, timeoutMs = 22000) {
+  const enc = encodeURIComponent(targetUrl);
+
+  const attempt = (url, transform, delayMs = 0) =>
+    new Promise((resolve, reject) => {
+      setTimeout(async () => {
+        try {
+          const res = await fetch(url, { signal: _timeoutSignal(timeoutMs - delayMs) });
+          resolve(await (transform ? transform(res) : (res.ok ? res : Promise.reject(new Error(res.status)))));
+        } catch (e) { reject(e); }
+      }, delayMs);
+    });
+
+  return Promise.any([
+    attempt('https://corsproxy.io/?url=' + enc,                        null,            0),
+    attempt('https://api.allorigins.win/raw?url=' + enc,               null,            800),
+    attempt('https://api.allorigins.win/get?url=' + enc, _wrapGetResponse, 2500),
+  ]).catch(() => { throw new Error('データ取得失敗（プロキシ全滅）'); });
+}
+
 // ─────────────────────────────────────────────
 // Data Fetching
 // ─────────────────────────────────────────────
-async function fetchYFChart(code) {
+async function _fetchYFChartOnce(code) {
   const yfUrl = `${YF_CHART_BASE}${code}.T?interval=1d&range=6mo`;
-  const res   = await proxyFetch(yfUrl, 20000);
+  const res   = await proxyFetch(yfUrl, 22000);
   const json  = await res.json();
   const result = json?.chart?.result?.[0];
   if (!result) throw new Error('データなし');
@@ -483,6 +486,16 @@ async function fetchYFChart(code) {
   }
   if (closes.length < 20) throw new Error('データ不足');
   return { name, dates, highs, lows, closes, volumes };
+}
+
+async function fetchYFChart(code) {
+  try {
+    return await _fetchYFChartOnce(code);
+  } catch (e) {
+    // 1回自動リトライ（1.5秒後）
+    await new Promise(r => setTimeout(r, 1500));
+    return await _fetchYFChartOnce(code);
+  }
 }
 
 async function fetchShinyoBairitu(code) {
@@ -505,45 +518,71 @@ async function fetchShinyoBairitu(code) {
 // ─────────────────────────────────────────────
 // Update Logic
 // ─────────────────────────────────────────────
+
+// Concurrency limiter: run tasks with at most `limit` in parallel
+async function _runConcurrent(tasks, limit) {
+  const results = new Array(tasks.length);
+  const queue = tasks.map((fn, i) => ({ fn, i }));
+  async function worker() {
+    while (queue.length) {
+      const { fn, i } = queue.shift();
+      results[i] = await fn();
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, tasks.length) }, worker));
+  return results;
+}
+
 async function updateAll() {
   if (isUpdating) return;
   isUpdating = true;
   const btn = document.getElementById('updateAllBtn');
-  btn.disabled = true; btn.textContent = '更新中...';
+  btn.disabled = true;
 
   const active = tickers.filter(t => t.trim() !== '');
-  // Show loading state on cards
+  // Show loading state
   for (const code of active) {
     stockResults[code] = { raw: null, shinyo: null, shinyoLoading: false, error: null, loading: true };
   }
   renderCards();
 
-  // Fetch OHLCV
-  const results = await Promise.all(active.map(async code => {
+  let done = 0;
+  const allResults = [];
+
+  // Fetch OHLCV — max 3 concurrent, render each card as it finishes
+  const tasks = active.map(code => async () => {
+    let result;
     try {
       const data = await fetchYFChart(code);
       const raw  = computeRaw(code, data.name, data.dates, data.highs, data.lows, data.closes, data.volumes);
       if (!raw) throw new Error('計算エラー');
-      return { code, raw, error: null };
-    } catch (e) { return { code, raw: null, error: e.message }; }
-  }));
+      result = { code, raw, error: null };
+    } catch (e) {
+      result = { code, raw: null, error: e.message };
+    }
+    allResults.push(result);
+    stockResults[code] = { raw: result.raw, shinyo: null, shinyoLoading: false, error: result.error, loading: false };
+    renderCardFor(code);
+    done++;
+    btn.textContent = `更新中 ${done}/${active.length}`;
+    return result;
+  });
 
-  // Swing scores (relative)
-  const goodRaws = results.filter(r => r.raw).map(r => r.raw);
+  await _runConcurrent(tasks, 3);
+
+  // Compute swing scores once all are in
+  const goodRaws = allResults.filter(r => r.raw).map(r => r.raw);
   computeSwingScores(goodRaws);
-
-  // Store & render
-  for (const { code, raw, error } of results) {
-    stockResults[code] = { raw, shinyo: null, shinyoLoading: !!raw, error, loading: false };
-  }
   renderCards();
   updateLastUpdated();
   btn.disabled = false; btn.textContent = '↻ 全更新';
   isUpdating = false;
 
-  // Fetch credit ratios async (show "-" on failure, not spinner)
-  for (const { code, raw } of results) {
+  // Fetch credit ratios sequentially (1 at a time to avoid hammering kabutan)
+  for (const { code, raw } of allResults) {
     if (!raw) continue;
+    stockResults[code].shinyoLoading = true;
+    renderCardFor(code);
     fetchShinyoBairitu(code).then(ratio => {
       if (!stockResults[code]) return;
       stockResults[code].shinyo = ratio;
@@ -554,6 +593,8 @@ async function updateAll() {
       stockResults[code].shinyoLoading = false;
       renderCardFor(code);
     });
+    // Small gap between credit ratio requests
+    await new Promise(r => setTimeout(r, 300));
   }
 }
 
@@ -749,19 +790,30 @@ function getCurrentSlotIdx() {
   return parseInt(document.getElementById('slotSelect').value, 10) || 0;
 }
 
+function _codeFromInput() {
+  if (pendingCode) return pendingCode;
+  // Accept bare code "7203" or "7203 トヨタ自動車" typed directly
+  const val = document.getElementById('searchInput').value.trim();
+  const m = val.match(/^(\d{4})(\s|$)/);
+  return m ? m[1] : null;
+}
+
 function saveSlot() {
   const i = getCurrentSlotIdx();
-  const code = pendingCode;
-  if (!code) return;
+  const code = _codeFromInput();
+  if (!code) { alert('銘柄コード（4桁）を入力してください'); return; }
   const oldCode = tickers[i];
+  if (oldCode === code) { closeDropdown(); return; }  // 変更なし
   tickers[i] = code;
   saveTickers();
+  pendingCode = null;
   renderSlotSelect();
   closeDropdown();
-  updateSingle(code).then(() => {
-    if (oldCode && oldCode !== code && !tickers.includes(oldCode)) delete stockResults[oldCode];
-    renderCards();
-  });
+  // カードを即座にロード中として追加表示してから取得開始
+  stockResults[code] = { raw: null, shinyo: null, shinyoLoading: false, error: null, loading: true };
+  if (oldCode && !tickers.includes(oldCode)) delete stockResults[oldCode];
+  renderCards();
+  updateSingle(code);
 }
 
 function deleteSlot() {
@@ -810,15 +862,24 @@ function showDropdown(q) {
   }).slice(0, 12);
 
   const dd = document.getElementById('searchDropdown');
-  if (!matches.length) { dd.style.display = 'none'; return; }
-
-  dd.innerHTML = matches.map(code => {
+  let html = matches.map(code => {
     const name = N225_JP[code] || N225_NAMES[code] || code;
     return `<div class="search-item" onclick="selectItem('${code}')">
       <span class="search-item-name">${name}</span>
       <span class="search-item-code">${code}</span>
     </div>`;
   }).join('');
+
+  // 4桁数字でN225に存在しないコードは「直接指定」として追加
+  if (/^\d{4}$/.test(q) && !N225_JP[q]) {
+    html = `<div class="search-item" style="border-bottom:1px solid var(--border)" onclick="selectItem('${q}')">
+      <span class="search-item-name" style="color:var(--accent)">コード ${q} を直接指定（日本株全般）</span>
+      <span class="search-item-code">${q}</span>
+    </div>` + html;
+  }
+
+  if (!html) { dd.style.display = 'none'; return; }
+  dd.innerHTML = html;
   dd.style.display = 'block';
 }
 
