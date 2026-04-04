@@ -524,11 +524,14 @@ def rank_score(values, higher_is_better=True, max_pts=30):
     else:
         return [(n - r) / (n - 1) * max_pts for r in ranks]
 
-rr_buys  = [r['rr_buy_raw']  for r in all_results]
-rr_sells = [r['rr_sell_raw'] for r in all_results]
-
-buy_rr_sc  = rank_score(rr_buys,  higher_is_better=True, max_pts=15)
-sell_rr_sc = rank_score(rr_sells, higher_is_better=True, max_pts=15)
+def rr_score_abs(rr):
+    """RRを絶対評価でスコア化（15点満点）"""
+    if rr is None or rr <= 0:  return 0
+    if rr >= 3.0: return 15
+    if rr >= 2.0: return 12
+    if rr >= 1.5: return 9
+    if rr >= 1.0: return 6
+    return 3
 
 # トレンドスコア（20点・絶対評価）
 # MA25 > MA75 → 買い20点/売り0点　MA25 ≤ MA75 → 買い0点/売り20点
@@ -551,8 +554,8 @@ for i, r in enumerate(all_results):
         buy_bb_score = sell_bb_score = 0
 
     # 方向仮決定（MACDクロス計算のため）
-    buy_score_tmp  = buy_trend_sc_i  + r['buy_rsi_score']  + buy_rr_sc[i]  + buy_bb_score
-    sell_score_tmp = sell_trend_sc_i + r['sell_rsi_score'] + sell_rr_sc[i] + sell_bb_score
+    buy_score_tmp  = buy_trend_sc_i  + r['buy_rsi_score']  + rr_score_abs(r['rr_buy_raw'])  + buy_bb_score
+    sell_score_tmp = sell_trend_sc_i + r['sell_rsi_score'] + rr_score_abs(r['rr_sell_raw']) + sell_bb_score
     tentative_dir  = "買い" if buy_score_tmp >= sell_score_tmp else "売り"
 
     # MACDクロス（10点・方向確定後）

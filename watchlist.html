@@ -382,8 +382,14 @@ function computeSwingScores(raws) {
   const n = eligible.length;
   if (n === 0) return;
 
-  const buyRR  = rankScore(eligible.map(r => r.rrBuyRaw),  true, 15);
-  const sellRR = rankScore(eligible.map(r => r.rrSellRaw), true, 15);
+  function rrScoreAbs(rr) {
+    if (!rr || rr <= 0) return 0;
+    if (rr >= 3.0) return 15;
+    if (rr >= 2.0) return 12;
+    if (rr >= 1.5) return 9;
+    if (rr >= 1.0) return 6;
+    return 3;
+  }
 
   for (let i = 0; i < n; i++) {
     const r = eligible[i];
@@ -392,8 +398,8 @@ function computeSwingScores(raws) {
     const pctB = r.pctB;
     const buyBB  = pctB !== null ? Math.max(0, round1((1 - pctB) * 20)) : 0;
     const sellBB = pctB !== null ? Math.max(0, round1(pctB * 20))        : 0;
-    const buyTmp  = buyTrendSc  + r.buyRsiScore  + buyRR[i]  + buyBB;
-    const sellTmp = sellTrendSc + r.sellRsiScore + sellRR[i] + sellBB;
+    const buyTmp  = buyTrendSc  + r.buyRsiScore  + rrScoreAbs(r.rrBuyRaw)  + buyBB;
+    const sellTmp = sellTrendSc + r.sellRsiScore + rrScoreAbs(r.rrSellRaw) + sellBB;
     const tentDir = buyTmp >= sellTmp ? '買い' : '売り';
     const { macd, signal } = calcMACDLines(r._closes);
     const macdPts = macdCrossScore(macd, signal, tentDir);
