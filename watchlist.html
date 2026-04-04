@@ -101,6 +101,14 @@
     .score-bar-fill { height: 100%; border-radius: 2px; transition: width .4s; }
     .score-note { font-size: 10px; color: var(--muted); margin-top: 4px; line-height: 1.3; }
     .score-excluded { font-size: 10px; color: var(--red); margin-top: 4px; }
+    .market-banner {
+      border-radius: var(--r); padding: 10px 14px; margin-bottom: 10px;
+      font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 8px;
+    }
+    .market-banner.up   { background: rgba(48,209,88,.15); color: var(--green); border: 1px solid rgba(48,209,88,.3); }
+    .market-banner.down { background: rgba(255,69,58,.15);  color: var(--red);   border: 1px solid rgba(255,69,58,.3); }
+    .market-banner.none { background: var(--surface2); color: var(--muted); border: 1px solid var(--border); }
+    .score-mkt-filtered { font-size: 10px; color: var(--yellow); margin-top: 4px; }
 
     .sl-tp-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
     .sl-box { background: rgba(255,69,58,.07); border: 1px solid rgba(255,69,58,.25); border-radius: 8px; padding: 7px 10px; }
@@ -156,6 +164,7 @@
   </div>
 </div>
 
+<div id="marketBanner" class="market-banner none" style="display:none"></div>
 <div class="cards-container" id="cardsContainer"></div>
 
 <div class="note">
@@ -193,10 +202,11 @@ function stockName(code) {
 // ─────────────────────────────────────────────
 // State
 // ─────────────────────────────────────────────
-let tickers      = [...DEFAULT_TICKERS];
-let stockResults = {};   // code → { raw, shinyo, shinyoLoading, error, loading }
-let pendingCode  = null; // code highlighted in search dropdown
-let isUpdating   = false;
+let tickers           = [...DEFAULT_TICKERS];
+let stockResults      = {};   // code → { raw, shinyo, shinyoLoading, error, loading }
+let pendingCode       = null; // code highlighted in search dropdown
+let isUpdating        = false;
+let nikkeiMarketTrend = null; // '買い' | '売り' | null
 
 // ─────────────────────────────────────────────
 // Technical Indicators
@@ -366,7 +376,7 @@ function computeRaw(code, name, dates, highs, lows, closes, volumes) {
   };
 }
 
-function computeSwingScores(raws) {
+function computeSwingScores(raws, marketTrend) {
   // ルール2: 前日比±3%超の銘柄をスイング選出から除外
   const eligible = raws.filter(r => Math.abs(r.changePct) <= 3.0);
   const excluded  = raws.filter(r => Math.abs(r.changePct) >  3.0);
@@ -376,6 +386,7 @@ function computeSwingScores(raws) {
     r.swingScoreBase = 0;
     r.swingSup = r.supBuy; r.swingRes = r.resBuy;
     r.swingExcluded = true;
+    r.swingMarketFiltered = false;
   }
 
   const n = eligible.length;
@@ -414,6 +425,9 @@ function computeSwingScores(raws) {
       r.swingRes = r.supBuy;        // 利確 = HVN下値
     }
     r.swingExcluded = false;
+    r.swingMarketFiltered = (marketTrend !== null && marketTrend !== undefined)
+      ? r.swingDir !== marketTrend
+      : false;
   }
 }
 
@@ -522,6 +536,39 @@ async function fetchShinyoBairitu(code) {
   }
 }
 
+// 日経平均MA10/MA25で市場トレンドを判定
+async function fetchNikkeiTrend(fast = 10, slow = 25) {
+  try {
+    const ticker = encodeURIComponent('^N225');
+    const yfUrl  = `${YF_CHART_BASE}${ticker}?interval=1d&range=3mo&_t=${Date.now()}`;
+    const res    = await proxyFetch(yfUrl, 15000);
+    const json   = await res.json();
+    const result = json?.chart?.result?.[0];
+    if (!result) return null;
+    const closes = result.indicators.quote[0].close.filter(c => c != null);
+    if (closes.length < slow) return null;
+    const maFast = closes.slice(-fast).reduce((a, b) => a + b, 0) / fast;
+    const maSlow = closes.slice(-slow).reduce((a, b) => a + b, 0) / slow;
+    return maFast >= maSlow ? '買い' : '売り';
+  } catch {
+    return null;
+  }
+}
+
+function renderMarketBanner(trend) {
+  const el = document.getElementById('marketBanner');
+  if (!el) return;
+  if (trend === null) { el.style.display = 'none'; return; }
+  el.style.display = 'flex';
+  if (trend === '買い') {
+    el.className = 'market-banner up';
+    el.textContent = '📈 市場環境フィルター: 日経↑上昇トレンド（買いシグナルのみ推奨）';
+  } else {
+    el.className = 'market-banner down';
+    el.textContent = '📉 市場環境フィルター: 日経↓下降トレンド（売りシグナルのみ推奨）';
+  }
+}
+
 // ─────────────────────────────────────────────
 // Update Logic
 // ─────────────────────────────────────────────
@@ -577,9 +624,11 @@ async function updateAll() {
 
   await _runConcurrent(tasks, 3);
 
-  // Compute swing scores once all are in
+  // Compute swing scores once all are in（日経トレンドを先に取得）
   const goodRaws = allResults.filter(r => r.raw).map(r => r.raw);
-  computeSwingScores(goodRaws);
+  nikkeiMarketTrend = await fetchNikkeiTrend();
+  renderMarketBanner(nikkeiMarketTrend);
+  computeSwingScores(goodRaws, nikkeiMarketTrend);
   renderCards();
   updateLastUpdated();
   btn.disabled = false; btn.textContent = '↻ 全更新';
@@ -614,7 +663,7 @@ async function updateSingle(code) {
     if (!raw) throw new Error('計算エラー');
     stockResults[code] = { raw, shinyo: null, shinyoLoading: true, error: null, loading: false };
     const allRaws = tickers.filter(t => t.trim() !== '' && stockResults[t]?.raw).map(t => stockResults[t].raw);
-    computeSwingScores(allRaws);
+    computeSwingScores(allRaws, nikkeiMarketTrend);
     renderCards();
     updateLastUpdated();
     fetchShinyoBairitu(code).then(ratio => {
@@ -700,6 +749,9 @@ function buildCard(code) {
   const swingNote = r.swingExcluded
     ? `<div class="score-excluded">⚠ 前日比±3%超・選出除外</div>`
     : '';
+  const mktFilterNote = (!r.swingExcluded && r.swingMarketFiltered)
+    ? `<div class="score-mkt-filtered">📊 市場環境フィルター対象外</div>`
+    : '';
 
   return `<div class="stock-card" id="card-${code}">
     <div class="card-hdr">
@@ -728,7 +780,7 @@ function buildCard(code) {
           <span class="score-dir ${swDirCls}">${r.swingDir}</span>
         </div>
         <div class="score-bar"><div class="score-bar-fill" style="width:${clamp(swScore)}%;background:${sBg(swScore)}"></div></div>
-        ${swingNote}
+        ${swingNote}${mktFilterNote}
       </div>
     </div>
     <div class="sl-tp-row">
