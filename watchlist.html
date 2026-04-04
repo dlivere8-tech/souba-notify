@@ -298,8 +298,8 @@ function calcHVN(dates, closes, volumes, curr, bins = 20) {
   const top5 = Array.from(bVols).map((v, i) => ({ v, c: minP + (i + 0.5) * binSz }))
     .sort((a, b) => b.v - a.v).slice(0, 5).map(x => x.c).sort((a, b) => a - b);
   return {
-    sup: Math.max(...top5.filter(p => p < curr), -Infinity),
-    res: Math.min(...top5.filter(p => p > curr), Infinity)
+    sup: Math.max(...top5.filter(p => p <= curr - minDist), -Infinity),
+    res: Math.min(...top5.filter(p => p >= curr + minDist), Infinity)
   };
 }
 
@@ -353,13 +353,21 @@ function computeRaw(code, name, dates, highs, lows, closes, volumes) {
     priceS * 10
   );
   const dtDir = changePct >= 0 ? '買い' : '売り';
-  const hvn = calcHVN(dates, closes, volumes, curr);
-  const supBuy = isFinite(hvn.sup) && hvn.sup !== -Infinity ? hvn.sup : null;
-  const resBuy = isFinite(hvn.res) && hvn.res !== Infinity  ? hvn.res : null;
-  // RR計算：損切はATRベース、利確はHVNベース（買い・売り対称）
+  // HVN 2コール設計（souba.py・バックテストと同方式）
+  // 利確目標：ATR×2以上離れた遠いHVN（なければATR×3フォールバック）
+  const hvnFar  = calcHVN(dates, closes, volumes, curr, 20, atr * 2);
+  // 損切ライン：現値に最も近いHVN（なければATR×1フォールバック）
+  const hvnNear = calcHVN(dates, closes, volumes, curr, 20, 0);
+  const resFar  = isFinite(hvnFar.res)  && hvnFar.res  !== Infinity  ? hvnFar.res  : (atr > 0 ? curr + atr * 3 : null);
+  const supFar  = isFinite(hvnFar.sup)  && hvnFar.sup  !== -Infinity ? hvnFar.sup  : (atr > 0 ? curr - atr * 3 : null);
+  const resNear = isFinite(hvnNear.res) && hvnNear.res !== Infinity  ? hvnNear.res : (atr > 0 ? curr + atr     : null);
+  const supNear = isFinite(hvnNear.sup) && hvnNear.sup !== -Infinity ? hvnNear.sup : (atr > 0 ? curr - atr     : null);
+  // RR計算：(遠HVN距離) / (近HVN距離) — souba.pyと同方式
   let rrBuy = 0, rrSell = 0;
-  if (resBuy !== null && atr > 0) rrBuy  = Math.abs(resBuy - curr) / atr;
-  if (supBuy !== null && atr > 0) rrSell = Math.abs(curr - supBuy) / atr;
+  if (resFar  !== null && supNear !== null && curr !== supNear)
+    rrBuy  = Math.abs(resFar  - curr) / Math.abs(curr - supNear);
+  if (supFar  !== null && resNear !== null && curr !== resNear)
+    rrSell = Math.abs(curr - supFar)  / Math.abs(resNear - curr);
   const pctB = calcBBPctB(closes);
   const rsiSc = rsiScore(rsi);
   return {
@@ -368,7 +376,7 @@ function computeRaw(code, name, dates, highs, lows, closes, volumes) {
     dtRes: dtDir === '買い' ? curr + 2*atr : curr - 2*atr,
     daytradeScore, rrBuyRaw: rrBuy, rrSellRaw: rrSell,
     buyRsiScore: rsiSc.buy, sellRsiScore: rsiSc.sell,
-    supBuy, resBuy, pctB,
+    resFar, supFar, resNear, supNear, pctB,
     _closes: closes, _highs: highs, _lows: lows, _volumes: volumes, _dates: dates
   };
 }
@@ -414,12 +422,12 @@ function computeSwingScores(raws, marketTrend) {
     const sellScore = sellTmp + (tentDir === '売り' ? macdPts : 0);
     if (buyScore >= sellScore) {
       r.swingDir = '買い'; r.swingScoreBase = round1(buyScore);
-      r.swingSup = r.curr - r.atr;  // 損切 = curr - ATR
-      r.swingRes = r.resBuy;        // 利確 = HVN上値
+      r.swingSup = r.supNear;  // 損切 = 近HVN下値
+      r.swingRes = r.resFar;   // 利確 = 遠HVN上値
     } else {
       r.swingDir = '売り'; r.swingScoreBase = round1(sellScore);
-      r.swingSup = r.curr + r.atr;  // 損切 = curr + ATR
-      r.swingRes = r.supBuy;        // 利確 = HVN下値
+      r.swingSup = r.resNear;  // 損切 = 近HVN上値
+      r.swingRes = r.supFar;   // 利確 = 遠HVN下値
     }
     r.swingExcluded = false;
     r.swingMarketFiltered = (marketTrend !== null && marketTrend !== undefined)
