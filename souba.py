@@ -650,11 +650,19 @@ dt_top10    = sorted(all_results, key=lambda x: x['daytrade_score'], reverse=Tru
 # ルール2: 前日比 ±3% 超は急騰・急落銘柄として除外（バックテスト最適閾値）
 swing_valid = [r for r in all_results if r['swing_rr_valid'] and abs(r['change_pct']) <= 3.0]
 
-# 市場環境フィルター：日経MA10/MA25でトレンド判定し逆方向シグナルを除外
+# 市場環境フィルター：日経MA10/MA25でトレンド判定し逆方向シグナルを-10ptペナルティ
+# （ハードフィルターではなくソフトフィルター：圧倒的スコアなら逆張りも残る）
 nikkei_market_trend = get_nikkei_trend(fast=10, slow=25)
 if nikkei_market_trend is not None:
-    filtered = [r for r in swing_valid if r['swing_direction'] == nikkei_market_trend]
-    swing_valid = filtered if len(filtered) >= 5 else swing_valid  # 候補が5件未満ならフィルター解除
+    for r in swing_valid:
+        if r['swing_direction'] != nikkei_market_trend:
+            r['swing_score'] = round(r['swing_score'] - 10, 1)
+            r['market_counter_trend'] = True
+        else:
+            r['market_counter_trend'] = False
+else:
+    for r in swing_valid:
+        r['market_counter_trend'] = False
 
 swing_top10 = sorted(swing_valid, key=lambda x: x['swing_score'], reverse=True)[:10]
 
@@ -834,6 +842,7 @@ def build_swing_table(results, earnings_flags, mismatch_codes=None, market_trend
         score_str = str(d['swing_score'])
         rr_str    = f"RR:{d['swing_rr']:.1f}" if d['swing_rr'] > 0 else "RR:-"
         macd_mark = "&#9733;" if d.get('macd_score', 0) > 0 else ""
+        counter_mark = "&#9660;-10pt逆張り" if d.get('market_counter_trend') else ""
 
         # 信用倍率表示
         ratio = d.get('shinyo_ratio')
@@ -875,6 +884,7 @@ def build_swing_table(results, earnings_flags, mismatch_codes=None, market_trend
             + f"<div style='font-size:12px;font-weight:bold;color:{score_color};'>{score_str}</div>"
             + f"<div style='font-size:10px;color:#666;'>{rr_str}"
             + (f" <span style='color:#ff6f00;'>{macd_mark}MACD</span>" if macd_mark else "")
+            + (f"<div style='font-size:9px;color:#888;'>{counter_mark}</div>" if counter_mark else "")
             + f"</div></td>"
             + "</tr>"
         )
@@ -883,9 +893,9 @@ def build_swing_table(results, earnings_flags, mismatch_codes=None, market_trend
         "<div style='background:#1a237e;color:#fff;padding:12px 16px;'>"
         "<h2 style='margin:0;font-size:15px;'>今週のスイング推奨</h2>"
         "<p style='margin:4px 0 0;font-size:11px;opacity:0.8;'>トレンド20(絶対)・RSI35・%B20・RR15・MACD10</p>"
-        + (f"<p style='margin:4px 0 0;font-size:11px;opacity:0.9;'>📊 市場環境フィルター: 日経{'↑上昇' if market_trend=='買い' else '↓下降'}トレンド（{'買い' if market_trend=='買い' else '売り'}シグナルのみ）</p>"
+        + (f"<p style='margin:4px 0 0;font-size:11px;opacity:0.9;'>📊 市場環境: 日経{'↑上昇' if market_trend=='買い' else '↓下降'}トレンド（逆張りは-10pt）</p>"
            if market_trend else
-           "<p style='margin:4px 0 0;font-size:11px;opacity:0.7;'>📊 市場環境フィルター: データ取得失敗（フィルターなし）</p>")
+           "<p style='margin:4px 0 0;font-size:11px;opacity:0.7;'>📊 市場環境: データ取得失敗（ペナルティなし）</p>")
         + "</div><div style='overflow-x:auto;'><table style='width:100%;border-collapse:collapse;'>"
         "<thead>" + thead + "</thead><tbody>" + tbody + "</tbody></table></div></div>"
     )

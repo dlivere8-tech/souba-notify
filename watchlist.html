@@ -442,6 +442,7 @@ function getFinalSwingScore(raw, shinyo) {
     if (raw.swingDir === '買い' && shinyo >= 5.0) s -= 10;
     if (raw.swingDir === '売り' && shinyo <= 0.5) s -= 10;
   }
+  if (raw.swingMarketFiltered) s -= 10;  // 市場逆張りペナルティ
   return round1(s);
 }
 
