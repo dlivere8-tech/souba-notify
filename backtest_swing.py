@@ -134,41 +134,97 @@ def _macd_lines(closes):
     return macd_full[8:], signal
 
 
-def calc_hvn(df, curr, bins=20, atr=None, atr_mult=2.0, fallback_mult=3.0):
+def calc_support_resistance(df, curr, direction, atr_val):
     """
-    atr指定時: curr±ATR×atr_mult 以上離れたHVNを選択。
-              該当HVNなし→ curr±ATR×fallback_mult をフォールバック目標とする。
+    過去データから価格帯別出来高×反転回数でサポレジを検出（souba.pyと同一ロジック）。
+
+    direction: 'buy' or 'sell'
+    戻り値: sl_price, tp_price, sl_strength, tp_strength
     """
     try:
-        closes  = df['Close'].values.astype(float)
-        volumes = df['Volume'].values.astype(float)
-        dates   = df['Date'] if 'Date' in df.columns else df.index
+        if len(df) < 60:
+            return None, None, 0, 0
 
-        cutoff = pd.Timestamp(dates.max()) - pd.Timedelta(days=30)
-        weights = np.where(pd.to_datetime(dates) >= cutoff, 2.0, 1.0)
-        wv = volumes * weights
+        close = df['Close'].values.astype(float)
+        high  = df['High'].values.astype(float)
+        low   = df['Low'].values.astype(float)
+        vol   = df['Volume'].values.astype(float)
+        n     = len(df)
 
-        bin_result = pd.cut(pd.Series(closes), bins=bins, labels=False, retbins=True)
-        pbins     = bin_result[0]
-        bin_edges = bin_result[1]
-        bcenters  = (bin_edges[:-1] + bin_edges[1:]) / 2
+        # ①価格帯別出来高（bins=20・直近3ヶ月×2重み）
+        price_min = close.min() * 0.98
+        price_max = close.max() * 1.02
+        bins = 20
+        bin_edges = np.linspace(price_min, price_max, bins + 1)
+        bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
 
-        vol_by_bin = pd.Series(wv).groupby(pbins).sum()
-        top5  = vol_by_bin.nlargest(5).index
-        hvn   = sorted([bcenters[int(i)] for i in top5 if int(i) < len(bcenters)])
+        cutoff = max(0, n - 63)
+        weights = np.ones(n)
+        weights[cutoff:] = 2.0
 
-        if atr and atr > 0:
-            min_dist = atr * atr_mult
-            sup = max([p for p in hvn if p <= curr - min_dist], default=None)
-            res = min([p for p in hvn if p >= curr + min_dist], default=None)
-            if sup is None: sup = curr - atr * fallback_mult
-            if res is None: res = curr + atr * fallback_mult
+        vol_by_bin = np.zeros(bins)
+        for i in range(n):
+            idx = np.searchsorted(bin_edges[1:], close[i])
+            idx = min(idx, bins - 1)
+            vol_by_bin[idx] += vol[i] * weights[i]
+
+        # ②反転回数カウント
+        reversal_by_bin = np.zeros(bins)
+        for i in range(1, n - 1):
+            if high[i] > high[i-1] and high[i] > high[i+1]:
+                idx = np.searchsorted(bin_edges[1:], high[i])
+                idx = min(idx, bins - 1)
+                reversal_by_bin[idx] += 1
+            if low[i] < low[i-1] and low[i] < low[i+1]:
+                idx = np.searchsorted(bin_edges[1:], low[i])
+                idx = min(idx, bins - 1)
+                reversal_by_bin[idx] += 1
+
+        # ③複合スコア（出来高×反転回数）
+        vol_norm      = vol_by_bin / (vol_by_bin.max() + 1e-10)
+        reversal_norm = reversal_by_bin / (reversal_by_bin.max() + 1e-10)
+        composite     = vol_norm * 0.6 + reversal_norm * 0.4
+
+        # ④現在値の上下に分けてTop候補を選ぶ
+        curr_bin = np.searchsorted(bin_edges[1:], curr)
+        curr_bin = min(curr_bin, bins - 1)
+
+        # ATRベースの最小距離制約
+        # SL: 0.5ATR以上離れたサポートのみ
+        # TP: 1.5ATR以上離れたレジスタンスのみ（RR≥1.5を構造的に担保）
+        min_sl_dist = atr_val * 0.5
+        min_tp_dist = atr_val * 1.5
+
+        support_bins = [(i, composite[i], bin_centers[i])
+                        for i in range(curr_bin)
+                        if bin_centers[i] < curr - min_sl_dist]
+        support_bins.sort(key=lambda x: x[1], reverse=True)
+
+        resist_bins = [(i, composite[i], bin_centers[i])
+                       for i in range(curr_bin + 1, bins)
+                       if bin_centers[i] > curr + min_tp_dist]
+        resist_bins.sort(key=lambda x: x[1], reverse=True)
+
+        def strength(score):
+            if score >= 0.7: return 3
+            if score >= 0.4: return 2
+            return 1
+
+        if direction == 'buy':
+            sl_price    = support_bins[0][2]  if support_bins else curr - atr_val * 1.5
+            sl_strength = strength(support_bins[0][1]) if support_bins else 1
+            tp_price    = resist_bins[0][2]   if resist_bins  else curr + atr_val * 3.0
+            tp_strength = strength(resist_bins[0][1]) if resist_bins else 1
         else:
-            sup = max([p for p in hvn if p < curr], default=None)
-            res = min([p for p in hvn if p > curr], default=None)
-        return sup, res
+            sl_price    = resist_bins[0][2]   if resist_bins  else curr + atr_val * 1.5
+            sl_strength = strength(resist_bins[0][1]) if resist_bins else 1
+            tp_price    = support_bins[0][2]  if support_bins else curr - atr_val * 3.0
+            tp_strength = strength(support_bins[0][1]) if support_bins else 1
+
+        return sl_price, tp_price, sl_strength, tp_strength
+
     except Exception:
-        return None, None
+        return None, None, 0, 0
 
 
 def calc_macd_cross(closes, direction):
@@ -221,19 +277,16 @@ def calc_indicators(df):
         atr_val = _atr(highs, lows, closes)
         pct_b   = _bb_pctb(closes)
 
-        # 利確目標：ATR×2以上離れた遠いHVN（なければATR×3フォールバック）
-        sup_tp, res_tp = calc_hvn(df, curr, atr=atr_val)
-        # 損切ライン：現在値に最も近いHVN（なければATR×1フォールバック）
-        sup_sl, res_sl = calc_hvn(df, curr)
-        buy_sl  = sup_sl if sup_sl is not None else (curr - atr_val if atr_val > 0 else None)
-        sell_sl = res_sl if res_sl is not None else (curr + atr_val if atr_val > 0 else None)
+        # calc_support_resistance でサポレジ計算（souba.pyと同一ロジック）
+        buy_sl,  buy_tp,  _, _ = calc_support_resistance(df, curr, 'buy',  atr_val)
+        sell_sl, sell_tp, _, _ = calc_support_resistance(df, curr, 'sell', atr_val)
 
-        # RR計算：利確=遠HVN、損切=近HVN
+        # RR計算
         rr_buy = rr_sell = 0.0
-        if res_tp is not None and buy_sl is not None and curr != buy_sl:
-            rr_buy  = abs(res_tp - curr) / abs(curr - buy_sl)
-        if sup_tp is not None and sell_sl is not None and curr != sell_sl:
-            rr_sell = abs(curr - sup_tp) / abs(sell_sl - curr)
+        if buy_tp is not None and buy_sl is not None and curr != buy_sl:
+            rr_buy  = abs(buy_tp  - curr) / abs(curr - buy_sl)
+        if sell_tp is not None and sell_sl is not None and curr != sell_sl:
+            rr_sell = abs(curr - sell_tp) / abs(sell_sl - curr)
 
         return {
             'curr':          curr,
@@ -244,10 +297,10 @@ def calc_indicators(df):
             'pct_b':         pct_b,
             'rr_buy_raw':    rr_buy,
             'rr_sell_raw':   rr_sell,
-            'sup_price':     sup_tp,    # 売り利確（遠HVN下値）
-            'res_price':     res_tp,    # 買い利確（遠HVN上値）
-            'buy_sl_price':  buy_sl,    # 買い損切（近HVN下値）
-            'sell_sl_price': sell_sl,   # 売り損切（近HVN上値）
+            'sup_price':     sell_tp,   # 売り利確
+            'res_price':     buy_tp,    # 買い利確
+            'buy_sl_price':  buy_sl,    # 買い損切
+            'sell_sl_price': sell_sl,   # 売り損切
             '_closes':       closes,
             '_df':           df,
         }
@@ -268,12 +321,17 @@ def rsi_score_new(rsi):
 
 
 def rr_score_abs(rr):
+    """
+    RR1.5〜2.5を最高点、外れるほど下げる設計。
+    RR<1.0は0点（TP<SL距離のトレードは除外）。
+    RR3.5+は3点に降格（TP遠すぎて5日で届かない）。
+    """
     if rr is None or rr <= 0: return 0
-    if rr >= 3.0: return 15
-    if rr >= 2.0: return 12
-    if rr >= 1.5: return 9
-    if rr >= 1.0: return 6
-    return 3
+    if rr < 1.0:  return 0   # RR<1.0は選外
+    if rr < 1.5:  return 6
+    if rr < 2.5:  return 15  # 最適帯
+    if rr < 3.5:  return 9   # やや遠すぎ
+    return 3                  # 3.5+は過剰
 
 
 # ─────────────────────────────────────────────

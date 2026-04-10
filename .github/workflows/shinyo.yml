@@ -1,0 +1,31 @@
+name: 信用倍率週次取得
+
+on:
+  schedule:
+    - cron: '30 7 * * 5'  # 日本時間 金曜16:30（UTC 7:30）
+  workflow_dispatch:        # 手動実行も可能
+
+jobs:
+  fetch_shinyo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Python セットアップ
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: ライブラリインストール
+        run: pip install requests beautifulsoup4 pytz
+
+      - name: 信用倍率取得
+        run: python fetch_shinyo.py
+
+      - name: shinyo_cache.json をコミット・プッシュ
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add shinyo_cache.json
+          git diff --staged --quiet || git commit -m "Update shinyo_cache.json $(date +'%Y-%m-%d')"
+          git push
