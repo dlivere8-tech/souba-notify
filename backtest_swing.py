@@ -66,6 +66,15 @@ HIST_BARS       = 80
 SL_BUFFER_MULTS = [1.0, 1.1, 1.2, 1.3, 1.5]  # SL距離拡張倍率（1.0=現状）
 
 # ─────────────────────────────────────────────
+# 指値バックテスト パラメータ
+# ─────────────────────────────────────────────
+RR_TARGETS      = [1.5, 2.0, 2.5, 3.0]  # テストするRR目標
+ENTRY_WINDOW    = 3      # エントリー待機日数（シグナル翌日から最大N日）
+SL_BUF          = 0.003  # SL: サポートの0.3%下まで粘る
+TP_BUF          = 0.005  # TP: レジスタンスの0.5%手前で逃げる
+ATR_FILTER_MULT = 2.0    # エントリー価格がsignal_closeからN×ATR以内のみ採用
+
+# ─────────────────────────────────────────────
 # テクニカル指標
 # ─────────────────────────────────────────────
 
@@ -227,6 +236,33 @@ def calc_support_resistance(df, curr, direction, atr_val):
         return None, None, 0, 0
 
 
+def calc_entry_params(sl_zone, tp_zone, rr_target, direction,
+                      sl_buf=SL_BUF, tp_buf=TP_BUF):
+    """
+    サポレジゾーンとRR目標から SL・TP・エントリー価格を逆算。
+
+    買い:
+      sl_actual = support  × (1 - sl_buf)   ← サポートの少し下
+      tp_actual = resist   × (1 - tp_buf)   ← 抵抗線の少し手前
+      entry     = (tp_actual + rr × sl_actual) / (1 + rr)  ← SL寄りに位置する
+
+    売り:
+      sl_actual = resist   × (1 + sl_buf)   ← 抵抗線の少し上
+      tp_actual = support  × (1 + tp_buf)   ← サポートの少し手前（上側）
+      entry     = (tp_actual + rr × sl_actual) / (1 + rr)  ← 同じ式で成立
+
+    戻り値: (sl_actual, tp_actual, entry_calc)
+    """
+    if direction == '買い':
+        sl_actual = sl_zone * (1 - sl_buf)
+        tp_actual = tp_zone * (1 - tp_buf)
+    else:
+        sl_actual = sl_zone * (1 + sl_buf)
+        tp_actual = tp_zone * (1 + tp_buf)
+    entry_calc = (tp_actual + rr_target * sl_actual) / (1 + rr_target)
+    return sl_actual, tp_actual, entry_calc
+
+
 def calc_macd_cross(closes, direction):
     try:
         ml, sl = _macd_lines(np.asarray(closes, float))
@@ -339,9 +375,20 @@ def rr_score_abs(rr):
 # ─────────────────────────────────────────────
 
 def score_swing_new(raws):
-    """NEW: トレンド20(絶対) + RSI35 + %B20 + RR15(絶対) + MACD10"""
+    """NEW: トレンド20(絶対) + RSI35 + %B20 + RR15(絶対) + MACD10
+    【改善】逆トレンド方向シグナルに-20ptペナルティ
+    　　　　（上昇中の売り・下降中の買いを上位から排除）
+    """
     for r in raws:
-        b_tr, s_tr = (20, 0) if r['ma_divergence'] > 0 else (0, 20)
+        # 乖離率2%未満は「方向性なし」としてトレンドスコア0pt
+        div_abs = abs(r['ma_divergence'])
+        if div_abs < 2.0:
+            b_tr, s_tr = 0, 0
+        elif r['ma_divergence'] > 0:
+            b_tr, s_tr = 20, 0
+        else:
+            b_tr, s_tr = 0, 20
+
         b_rsi, s_rsi = rsi_score_new(r['rsi'])
         pctb = r['pct_b']
         b_bb  = max(0, round((1 - pctb) * 20, 1)) if pctb is not None else 0
@@ -354,6 +401,12 @@ def score_swing_new(raws):
         macd = calc_macd_cross(r['_closes'], tent)
         buy_score  = buy_tmp  + (macd if tent == "買い" else 0)
         sell_score = sell_tmp + (macd if tent == "売り" else 0)
+
+        # 逆トレンド方向ペナルティ：上昇中の売り・下降中の買いは-20pt
+        if   tent == "売り" and r['ma_divergence'] > 0:
+            sell_score = max(0, round(sell_score - 20, 1))
+        elif tent == "買い" and r['ma_divergence'] < 0:
+            buy_score  = max(0, round(buy_score  - 20, 1))
 
         atr = r['atr_val']
         if buy_score >= sell_score:
@@ -375,8 +428,14 @@ def score_swing_new(raws):
 # 除外ルール（ルール2のみ：前日比±3%超除外）
 # ─────────────────────────────────────────────
 
+MIN_DIVERGENCE = 2.0   # MA乖離率の最低ライン（絶対値）。2%未満は「方向性不明」として除外
+
 def apply_exclusions(raws, rule2_threshold=3.0):
-    return [r for r in raws if abs(r['change_pct']) <= rule2_threshold]
+    return [
+        r for r in raws
+        if abs(r['change_pct']) <= rule2_threshold
+        and abs(r.get('ma_divergence', 0)) >= MIN_DIVERGENCE  # 乖離率2%未満を除外
+    ]
 
 
 # ─────────────────────────────────────────────
@@ -731,6 +790,265 @@ def calc_monthly_analysis(trade_records):
 
 
 # ─────────────────────────────────────────────
+# 指値バックテスト本体
+# ─────────────────────────────────────────────
+
+def run_backtest_limit(all_data_dict, eval_dates, rr_target,
+                       atr_filter_mult=ATR_FILTER_MULT,
+                       entry_window=ENTRY_WINDOW,
+                       nikkei_data=None, use_market_filter=False,
+                       nikkei_fast=25, nikkei_slow=75):
+    """
+    指値エントリー方式のバックテスト。
+
+    シグナル日の翌1〜entry_window日の間に
+    買い: その日のLOW <= entry_calc
+    売り: その日のHIGH >= entry_calc
+    で約定。未到達は評価対象外。
+    """
+    import copy
+
+    trade_records  = []
+    stats = {'unfilled': 0, 'atr_filtered': 0, 'dir_oor': 0, 'total_signals': 0}
+
+    for eval_dt in eval_dates:
+        eval_ts = pd.Timestamp(eval_dt).normalize()
+
+        slices = {}
+        for code, df_full in all_data_dict.items():
+            df_slice = df_full[df_full.index.normalize() < eval_ts]
+            if len(df_slice) >= HIST_BARS:
+                slices[code] = df_slice
+
+        vol_scores = [(code, (df_s.tail(5)['Volume'] * df_s.tail(5)['Close']).mean() / 1e8)
+                      for code, df_s in slices.items()]
+        vol_scores.sort(key=lambda x: x[1], reverse=True)
+        top_codes = {code for code, _ in vol_scores[:TOP_VOL]}
+
+        raws = []
+        for code in top_codes:
+            raw = calc_indicators(slices[code])
+            if raw is None:
+                continue
+            raw['code'] = code
+            raws.append(raw)
+
+        if len(raws) < 3:
+            continue
+
+        raws_copy = copy.deepcopy(raws)
+        score_swing_new(raws_copy)
+
+        candidates = [r for r in raws_copy if r.get('swing_rr_valid', False)]
+        candidates = apply_exclusions(candidates)
+        if not candidates:
+            continue
+
+        if use_market_filter and nikkei_data is not None:
+            nikkei_trend = calc_nikkei_trend(nikkei_data, eval_ts,
+                                             fast=nikkei_fast, slow=nikkei_slow)
+            if nikkei_trend is not None:
+                candidates = [r for r in candidates
+                              if r['swing_direction'] == nikkei_trend]
+            if not candidates:
+                continue
+
+        top = sorted(candidates, key=lambda x: x['swing_score'], reverse=True)[:TOP_N]
+        stats['total_signals'] += len(top)
+
+        for rank, s in enumerate(top, 1):
+            code      = s['code']
+            direction = s['swing_direction']
+            curr      = s['curr']          # シグナル日終値
+            atr       = s['atr_val']
+            sl_zone   = s['swing_sl']      # サポレジゾーン境界
+            tp_zone   = s['swing_tp']
+
+            if sl_zone is None or tp_zone is None:
+                continue
+
+            sl_actual, tp_actual, entry_calc = calc_entry_params(
+                sl_zone, tp_zone, rr_target, direction)
+
+            # エントリーが現在値の正しい方向にあるか確認
+            if direction == '買い' and entry_calc >= curr:
+                stats['dir_oor'] += 1
+                continue
+            if direction == '売り' and entry_calc <= curr:
+                stats['dir_oor'] += 1
+                continue
+
+            # ATRフィルター：エントリー価格がcurrから遠すぎる場合は除外
+            if atr > 0 and abs(entry_calc - curr) > atr_filter_mult * atr:
+                stats['atr_filtered'] += 1
+                continue
+
+            df_full     = all_data_dict[code]
+            future_bars = df_full[df_full.index.normalize() > eval_ts]
+            if len(future_bars) < 1:
+                continue
+
+            # ── エントリー到達チェック（最大 entry_window 日）──
+            entry_triggered  = False
+            entry_day_offset = None
+            for day_idx, (_, bar) in enumerate(future_bars.head(entry_window).iterrows()):
+                if direction == '買い' and float(bar['Low']) <= entry_calc:
+                    entry_triggered  = True
+                    entry_day_offset = day_idx
+                    break
+                elif direction == '売り' and float(bar['High']) >= entry_calc:
+                    entry_triggered  = True
+                    entry_day_offset = day_idx
+                    break
+
+            if not entry_triggered:
+                stats['unfilled'] += 1
+                continue
+
+            entry_price = entry_calc
+
+            # ── TP/SL判定（エントリー日から最大HOLD_DAYS日）──
+            hold_bars = future_bars.iloc[entry_day_offset: entry_day_offset + HOLD_DAYS]
+            if len(hold_bars) < 1:
+                continue
+
+            result     = None
+            exit_price = None
+            mfe = mae  = 0.0
+            daily_data = []   # [(日次最大含み益%, 日次終値リターン%)]
+
+            for _, bar in hold_bars.iterrows():
+                bar_high  = float(bar['High'])
+                bar_low   = float(bar['Low'])
+                bar_close = float(bar['Close'])
+
+                if direction == '買い':
+                    bar_mfe = bar_high - entry_price
+                    bar_mae = entry_price - bar_low
+                    hit_tp  = bar_high >= tp_actual
+                    hit_sl  = bar_low  <= sl_actual
+                    d_mfe   = (bar_high  - entry_price) / entry_price * 100
+                    d_ret   = (bar_close - entry_price) / entry_price * 100
+                else:
+                    bar_mfe = entry_price - bar_low
+                    bar_mae = bar_high - entry_price
+                    hit_tp  = bar_low  <= tp_actual
+                    hit_sl  = bar_high >= sl_actual
+                    d_mfe   = (entry_price - bar_low)   / entry_price * 100
+                    d_ret   = (entry_price - bar_close) / entry_price * 100
+
+                mfe = max(mfe, bar_mfe)
+                mae = max(mae, bar_mae)
+                daily_data.append((round(d_mfe, 3), round(d_ret, 3)))
+
+                if hit_sl or hit_tp:
+                    if hit_sl and hit_tp:
+                        result = 'loss';      exit_price = sl_actual
+                    elif hit_sl:
+                        result = 'loss';      exit_price = sl_actual
+                    else:
+                        result = 'win';       exit_price = tp_actual
+                    break
+
+            if result is None:
+                exit_price = float(hold_bars.iloc[-1]['Close'])
+                pnl_tmp    = (exit_price - entry_price) if direction == '買い' \
+                             else (entry_price - exit_price)
+                result     = 'forced_win' if pnl_tmp > 0 else 'forced_loss'
+
+            if direction == '買い':
+                pnl     = exit_price - entry_price
+            else:
+                pnl     = entry_price - exit_price
+            pnl_pct = pnl / entry_price * 100
+            rr_real = pnl / abs(sl_actual - entry_price) \
+                      if sl_actual != entry_price else 0.0
+
+            # 日次データを列に展開（不足分はnan埋め）
+            while len(daily_data) < HOLD_DAYS:
+                daily_data.append((float('nan'), float('nan')))
+
+            trade_records.append({
+                'rr_target':  rr_target,
+                'eval_dt':    eval_dt.strftime('%Y-%m-%d'),
+                'code':       code,
+                'direction':  direction,
+                'curr':       round(curr, 1),
+                'entry':      round(entry_price, 1),
+                'tp':         round(tp_actual, 1),
+                'sl':         round(sl_actual, 1),
+                'exit':       round(exit_price, 1),
+                'result':     result,
+                'pnl_pct':    round(pnl_pct, 2),
+                'rr_real':    round(rr_real, 2),
+                'mfe_pct':    round(mfe / entry_price * 100, 2),
+                'mae_pct':    round(mae / entry_price * 100, 2),
+                'entry_day':  entry_day_offset + 1,
+                'swing_rank': rank,
+                **{f'd{i+1}_mfe': daily_data[i][0] for i in range(HOLD_DAYS)},
+                **{f'd{i+1}_ret': daily_data[i][1] for i in range(HOLD_DAYS)},
+            })
+
+    return trade_records, stats
+
+
+def calc_metrics_limit(trade_records, stats):
+    """指値バックテスト用メトリクス計算"""
+    if not trade_records:
+        return {}
+
+    n        = len(trade_records)
+    wins     = [t for t in trade_records if t['result'] in ('win', 'forced_win')]
+    losses   = [t for t in trade_records if t['result'] in ('loss', 'forced_loss')]
+    tp_wins  = [t for t in trade_records if t['result'] == 'win']
+    sl_losses= [t for t in trade_records if t['result'] == 'loss']
+
+    win_rate     = len(wins) / n * 100
+    gross_profit = sum(t['pnl_pct'] for t in wins)
+    gross_loss   = abs(sum(t['pnl_pct'] for t in losses))
+    pf           = gross_profit / gross_loss if gross_loss > 0 else float('inf')
+    avg_pnl      = np.mean([t['pnl_pct'] for t in trade_records])
+    avg_mfe      = np.mean([t['mfe_pct'] for t in trade_records])
+    avg_mae      = np.mean([t['mae_pct'] for t in trade_records])
+
+    total_signals = stats['total_signals']
+    entry_rate    = n / total_signals * 100 if total_signals > 0 else 0.0
+
+    # 日次含み益（MFE）・終値リターン平均
+    day_mfe_avgs = []
+    day_ret_avgs = []
+    for d in range(1, HOLD_DAYS + 1):
+        mfe_vals = [t[f'd{d}_mfe'] for t in trade_records
+                    if isinstance(t.get(f'd{d}_mfe'), float)
+                    and not np.isnan(t[f'd{d}_mfe'])]
+        ret_vals = [t[f'd{d}_ret'] for t in trade_records
+                    if isinstance(t.get(f'd{d}_ret'), float)
+                    and not np.isnan(t[f'd{d}_ret'])]
+        day_mfe_avgs.append(round(np.mean(mfe_vals), 3) if mfe_vals else 0.0)
+        day_ret_avgs.append(round(np.mean(ret_vals), 3) if ret_vals else 0.0)
+
+    return {
+        'n':             n,
+        'wins':          len(wins),
+        'tp_wins':       len(tp_wins),
+        'sl_losses':     len(sl_losses),
+        'win_rate':      round(win_rate, 1),
+        'pf':            round(pf, 2),
+        'avg_pnl':       round(avg_pnl, 2),
+        'avg_mfe':       round(avg_mfe, 2),
+        'avg_mae':       round(avg_mae, 2),
+        'sl_rate':       round(len(sl_losses) / n * 100, 1),
+        'tp_rate':       round(len(tp_wins)   / n * 100, 1),
+        'entry_rate':    round(entry_rate, 1),
+        'total_signals': total_signals,
+        'unfilled':      stats['unfilled'],
+        'atr_filtered':  stats['atr_filtered'],
+        'day_mfe_avgs':  day_mfe_avgs,
+        'day_ret_avgs':  day_ret_avgs,
+    }
+
+
+# ─────────────────────────────────────────────
 # メイン
 # ─────────────────────────────────────────────
 
@@ -1034,3 +1352,94 @@ if __name__ == '__main__':
         writer.writeheader()
         writer.writerows(trades_f)
     print(f"市場フィルターあり明細: {filtered_csv}")
+
+    # ──────────────────────────────────────────────────────────────────
+    # [4/4] 指値バックテスト実行（RR目標別・エントリー待機あり）
+    # ──────────────────────────────────────────────────────────────────
+    print(f"\n{'='*72}")
+    print(f"[4/4] 指値バックテスト実行中...")
+    print(f"  設定: SL_BUF={SL_BUF*100:.1f}%  TP_BUF={TP_BUF*100:.1f}%  "
+          f"エントリー待機={ENTRY_WINDOW}日  ATRフィルター={ATR_FILTER_MULT}倍")
+    print(f"{'='*72}")
+
+    limit_results = {}
+    for rr in RR_TARGETS:
+        print(f"  RR={rr:.1f} 実行中...", end="\r")
+        trades_l, stats_l = run_backtest_limit(
+            all_data, eval_dates, rr_target=rr)
+        limit_results[rr] = {
+            'trades':  trades_l,
+            'stats':   stats_l,
+            'metrics': calc_metrics_limit(trades_l, stats_l),
+        }
+    print()
+
+    # ── 比較表表示 ──
+    print(f"\n{'='*80}")
+    print("【指値バックテスト RR目標別比較】")
+    print(f"  ※ 成行(×1.0)は参考値（エントリー率100%の従来方式）")
+    print(f"{'='*80}")
+
+    base_m = all_metrics[1.0]  # 成行ベースライン
+    col_w  = 10
+    header = (f"{'指標':<20}{'成行(参考)':>{col_w}}"
+              + "".join(f"{'RR='+str(rr):>{col_w}}" for rr in RR_TARGETS))
+    print(header)
+    print("-" * 80)
+
+    def lrow(label, base_val, vals, fmt=".1f"):
+        bv   = format(base_val, fmt)
+        line = "".join(format(v, fmt).rjust(col_w) for v in vals)
+        print(f"{label:<20}{bv:>{col_w}}{line}")
+
+    lrow("エントリー率(%)",  100.0,
+         [limit_results[rr]['metrics'].get('entry_rate', 0) for rr in RR_TARGETS])
+    lrow("勝率(%)",          base_m['win_rate'],
+         [limit_results[rr]['metrics']['win_rate']  for rr in RR_TARGETS])
+    lrow("プロフィットF",    base_m['pf'],
+         [limit_results[rr]['metrics']['pf']        for rr in RR_TARGETS], fmt=".2f")
+    lrow("SL到達率(%)",      round(base_m['sl_losses']/base_m['n']*100,1),
+         [limit_results[rr]['metrics']['sl_rate']   for rr in RR_TARGETS])
+    lrow("TP到達率(%)",      round(base_m['tp_wins']/base_m['n']*100,1),
+         [limit_results[rr]['metrics']['tp_rate']   for rr in RR_TARGETS])
+    lrow("平均損益(%)",      base_m['avg_pnl'],
+         [limit_results[rr]['metrics']['avg_pnl']   for rr in RR_TARGETS], fmt="+.2f")
+    lrow("平均MFE(%)",       base_m['avg_mfe'],
+         [limit_results[rr]['metrics']['avg_mfe']   for rr in RR_TARGETS], fmt=".2f")
+    lrow("平均MAE(%)",       base_m['avg_mae'],
+         [limit_results[rr]['metrics']['avg_mae']   for rr in RR_TARGETS], fmt=".2f")
+    print("-" * 80)
+
+    # ── 日次含み益（MFE）推移 ──
+    print(f"\n【日次含み益（MFE）推移 ― エントリー後N日目の最大含み益平均】")
+    print(f"  成行(参考): OHLC累積スコアとは定義が異なるため省略")
+    day_header = f"{'':>8}" + "".join(f"{'RR='+str(rr):>{col_w}}" for rr in RR_TARGETS)
+    print(day_header)
+    for d in range(HOLD_DAYS):
+        row = f"  {d+1}日目MFE"
+        for rr in RR_TARGETS:
+            avgs = limit_results[rr]['metrics']['day_mfe_avgs']
+            row += f"{avgs[d]:>{col_w}.3f}%"
+        print(row)
+    print()
+    print(f"{'':>8}" + "".join(f"{'RR='+str(rr):>{col_w}}" for rr in RR_TARGETS))
+    for d in range(HOLD_DAYS):
+        row = f"  {d+1}日目終値"
+        for rr in RR_TARGETS:
+            avgs = limit_results[rr]['metrics']['day_ret_avgs']
+            row += f"{avgs[d]:>{col_w}.3f}%"
+        print(row)
+
+    # ── CSV出力 ──
+    limit_csv = 'backtest_limit_trades.csv'
+    all_limit_trades = []
+    for rr in RR_TARGETS:
+        all_limit_trades.extend(limit_results[rr]['trades'])
+
+    if all_limit_trades:
+        fieldnames = list(all_limit_trades[0].keys())
+        with open(limit_csv, 'w', newline='', encoding='utf-8-sig') as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(all_limit_trades)
+        print(f"\n指値バックテスト明細: {limit_csv}")

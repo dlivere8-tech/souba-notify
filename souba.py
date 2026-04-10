@@ -508,7 +508,13 @@ def rr_score_abs(rr):
     return 3                  # 3.5+は過剰
 
 for i, r in enumerate(all_results):
-    if r['ma_divergence'] > 0:
+    # 【スコア改善】乖離率が2%未満は「方向性なし」としてトレンドスコア0pt
+    # 弱いトレンドは方向が不確かなため、強い乖離のみ20ptを付与
+    div_abs = abs(r['ma_divergence'])
+    if div_abs < 2.0:
+        buy_trend_sc_i  = 0
+        sell_trend_sc_i = 0
+    elif r['ma_divergence'] > 0:
         buy_trend_sc_i  = 20
         sell_trend_sc_i = 0
     else:
@@ -531,6 +537,13 @@ for i, r in enumerate(all_results):
 
     buy_score  = buy_score_tmp  + (macd_score if tentative_dir == "買い" else 0)
     sell_score = sell_score_tmp + (macd_score if tentative_dir == "売り" else 0)
+
+    # 【スコア改善】逆トレンド方向ペナルティ：上昇中の売り・下降中の買いは-20pt
+    # （従来の-10ptより強く抑制し、逆張りシグナルを上位から排除）
+    if   tentative_dir == "売り" and r['ma_divergence'] > 0:
+        sell_score = max(0, round(sell_score - 20, 1))
+    elif tentative_dir == "買い" and r['ma_divergence'] < 0:
+        buy_score  = max(0, round(buy_score  - 20, 1))
 
     buy_rr_valid  = (r['buy_tp_price']  is not None and r['rr_buy_raw']  > 0)
     sell_rr_valid = (r['sell_tp_price'] is not None and r['rr_sell_raw'] > 0)
@@ -593,8 +606,10 @@ def get_nikkei_trend(fast=10, slow=25):
 # TOP10選出
 # 【変更④】%ATRフィルター：低ボラ銘柄をスイング対象から除外
 # 【変更⑤】スコア最低閾値：60点未満は除外（弱い売りシグナルを自然淘汰）
+# 【改善】MIN_DIVERGENCE：MA乖離率2%未満は「方向性不明」として除外
 # ========================================
 MIN_SWING_SCORE = 60
+MIN_DIVERGENCE  = 2.0   # MA25/75乖離率の最低ライン（絶対値）
 
 dt_top10 = sorted(all_results, key=lambda x: x['daytrade_score'], reverse=True)[:10]
 
@@ -604,6 +619,7 @@ swing_valid = [
     and abs(r['change_pct']) <= 3.0
     and not r['low_volatility']        # 【変更④】%ATR 0.8%未満を除外
     and r['swing_score'] >= MIN_SWING_SCORE  # 【変更⑤】スコア60点未満を除外
+    and abs(r['ma_divergence']) >= MIN_DIVERGENCE  # 【改善】乖離率2%未満を除外
 ]
 
 nikkei_market_trend = get_nikkei_trend(fast=10, slow=25)
