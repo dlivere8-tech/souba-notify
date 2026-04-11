@@ -282,22 +282,23 @@ def calc_support_resistance(df, curr, direction, atr_val):
         curr_bin = np.searchsorted(bin_edges[1:], curr)
         curr_bin = min(curr_bin, bins - 1)
 
-        # ATRベースの最小距離制約
-        # SL: 0.5ATR以上離れたサポートのみ（近すぎるストップを防ぐ）
-        # TP: 1.5ATR以上離れたレジスタンスのみ（RR≥1.5を構造的に担保）
+        # ATRベースの距離制約
+        # min: 近すぎるノイズを除外
+        # max: 5日スイングの実効レンジ（ATR×3）に絞る
         min_sl_dist = atr_val * 0.5
         min_tp_dist = atr_val * 1.5
+        max_dist    = atr_val * 3.0
 
-        # 下側：サポート候補
+        # 下側：サポート候補（ATR×3以内）
         support_bins = [(i, composite[i], bin_centers[i])
                         for i in range(curr_bin)
-                        if bin_centers[i] < curr - min_sl_dist]
+                        if curr - max_dist < bin_centers[i] < curr - min_sl_dist]
         support_bins.sort(key=lambda x: x[1], reverse=True)
 
-        # 上側：レジスタンス候補
+        # 上側：レジスタンス候補（ATR×3以内）
         resist_bins = [(i, composite[i], bin_centers[i])
                        for i in range(curr_bin + 1, bins)
-                       if bin_centers[i] > curr + min_tp_dist]
+                       if curr + min_tp_dist < bin_centers[i] < curr + max_dist]
         resist_bins.sort(key=lambda x: x[1], reverse=True)
 
         # ---- ⑤方向で損切り・利確を割り当て ----
@@ -552,36 +553,24 @@ for i, r in enumerate(all_results):
     buy_rr_valid  = (r['buy_tp_price']  is not None and r['rr_buy_raw']  > 0)
     sell_rr_valid = (r['sell_tp_price'] is not None and r['rr_sell_raw'] > 0)
 
-    RR_TARGET = 1.0  # 目標RR（SL逆算用）
-
     price = r['price']
     if buy_score >= sell_score:
-        tp = r['buy_tp_price']
-        tp_dist = (tp - price) if tp is not None else 0
-        rr_sl = (price - tp_dist / RR_TARGET) if tp_dist > 0 else None
         r['swing_direction'] = "買い"
         r['swing_score']     = round(buy_score, 1)
-        r['swing_sup']       = rr_sl              # RR=1.0逆算SL（実用損切り）
-        r['swing_res']       = tp
-        r['swing_sup_str']   = 0                  # 計算値なので★なし
+        r['swing_sup']       = r['buy_sl_price']  # HVN支持（ATR×3内）
+        r['swing_res']       = r['buy_tp_price']  # HVN抵抗（ATR×3内）
+        r['swing_sup_str']   = r['buy_sl_str']    # ★強度
         r['swing_res_str']   = r['buy_tp_str']
-        r['swing_hvn_sup']   = r['buy_sl_price']  # HVN下値めど（参考）
-        r['swing_hvn_str']   = r['buy_sl_str']
-        r['swing_rr']        = RR_TARGET
+        r['swing_rr']        = r['rr_buy_raw']
         r['swing_rr_valid']  = buy_rr_valid
     else:
-        tp = r['sell_tp_price']
-        tp_dist = (price - tp) if tp is not None else 0
-        rr_sl = (price + tp_dist / RR_TARGET) if tp_dist > 0 else None
         r['swing_direction'] = "売り"
         r['swing_score']     = round(sell_score, 1)
-        r['swing_sup']       = rr_sl              # RR=1.0逆算SL（実用損切り）
-        r['swing_res']       = tp
-        r['swing_sup_str']   = 0                  # 計算値なので★なし
+        r['swing_sup']       = r['sell_sl_price'] # HVN抵抗（ATR×3内）
+        r['swing_res']       = r['sell_tp_price'] # HVN支持（ATR×3内）
+        r['swing_sup_str']   = r['sell_sl_str']
         r['swing_res_str']   = r['sell_tp_str']
-        r['swing_hvn_sup']   = r['sell_sl_price'] # HVN上値めど（参考）
-        r['swing_hvn_str']   = r['sell_sl_str']
-        r['swing_rr']        = RR_TARGET
+        r['swing_rr']        = r['rr_sell_raw']
         r['swing_rr_valid']  = sell_rr_valid
 
     r['macd_score']     = macd_score
@@ -873,13 +862,10 @@ def build_swing_table(results, earnings_flags, mismatch_codes=None, market_trend
 
         rsi_str = f"RSI:{d['rsi']:.1f}"
 
-        # ラインの強度表示（★）
+        # ラインの強度表示（★）―SL/TP両方ATR×3内HVN根拠
         res_str = f"利:{d['swing_res']:,.0f} {strength_stars(d.get('swing_res_str',1))}" if d['swing_res'] else "利:-"
-        # 損切り（RR=1.0逆算）
-        sup_str  = f"損:{d['swing_sup']:,.0f}" if d['swing_sup'] else "損:-"
-        # HVN下値めど（参考）
-        hvn_val  = d.get('swing_hvn_sup')
-        hvn_str  = f"めど:{hvn_val:,.0f} {strength_stars(d.get('swing_hvn_str',1))}" if hvn_val else ""
+        sup_str = f"損:{d['swing_sup']:,.0f} {strength_stars(d.get('swing_sup_str',1))}" if d['swing_sup'] else "損:-"
+        hvn_str = ""  # ATR×3内HVNに統一したため不要
 
         score_str    = str(d['swing_score'])
         # TP距離を%で表示（RR=1.0なので損切りも同距離）
