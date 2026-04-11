@@ -63,7 +63,7 @@ HOLD_DAYS       = 5
 TOP_N           = 10
 TOP_VOL         = 50
 HIST_BARS       = 80
-SL_BUFFER_MULTS = [1.0, 1.1, 1.2, 1.3, 1.5]  # SL距離拡張倍率（1.0=現状）
+SL_BUFFER_MULTS = [1.0, 1.5, 2.0, 2.5, 3.0]  # SL距離拡張倍率（ATR×N倍）
 
 # ─────────────────────────────────────────────
 # 指値バックテスト パラメータ
@@ -320,12 +320,13 @@ def calc_indicators(df):
         buy_sl,  buy_tp,  _, _ = calc_support_resistance(df, curr, 'buy',  atr_val)
         sell_sl, sell_tp, _, _ = calc_support_resistance(df, curr, 'sell', atr_val)
 
-        # RR計算
-        rr_buy = rr_sell = 0.0
-        if buy_tp is not None and buy_sl is not None and curr != buy_sl:
-            rr_buy  = abs(buy_tp  - curr) / abs(curr - buy_sl)
-        if sell_tp is not None and sell_sl is not None and curr != sell_sl:
-            rr_sell = abs(curr - sell_tp) / abs(sell_sl - curr)
+        # ATRベース実用損切り（エントリー価格 ± 1ATR）
+        atr_sl_buy  = curr - atr_val   # 買い: -1ATR
+        atr_sl_sell = curr + atr_val   # 売り: +1ATR
+
+        # RR計算：ATRベース（実用的RR = TP距離 / 1ATR）
+        atr_rr_buy  = abs(buy_tp  - curr) / atr_val if atr_val > 0 and buy_tp  is not None else 0.0
+        atr_rr_sell = abs(curr - sell_tp) / atr_val if atr_val > 0 and sell_tp is not None else 0.0
 
         return {
             'curr':          curr,
@@ -335,12 +336,14 @@ def calc_indicators(df):
             'ma5_25_bull':   ma5_25_bull,   # MA5>MA25(短期↑)
             'atr_val':       atr_val,
             'pct_b':         pct_b,
-            'rr_buy_raw':    rr_buy,
-            'rr_sell_raw':   rr_sell,
-            'sup_price':     sell_tp,   # 売り利確
-            'res_price':     buy_tp,    # 買い利確
-            'buy_sl_price':  buy_sl,    # 買い損切
-            'sell_sl_price': sell_sl,   # 売り損切
+            'rr_buy_raw':    atr_rr_buy,    # ATRベースRR（実用値）
+            'rr_sell_raw':   atr_rr_sell,   # ATRベースRR（実用値）
+            'sup_price':     sell_tp,       # 売り利確（HVN）
+            'res_price':     buy_tp,        # 買い利確（HVN）
+            'buy_sl_price':  atr_sl_buy,    # 買い損切（ATR×1.0）
+            'sell_sl_price': atr_sl_sell,   # 売り損切（ATR×1.0）
+            'hvn_sup':       buy_sl,        # HVN下値めど（参考）
+            'hvn_res':       sell_sl,       # HVN上値めど（参考）
             '_closes':       closes,
             '_df':           df,
         }
@@ -434,14 +437,16 @@ def score_swing_new(raws):
 
 MIN_DIVERGENCE = 2.0   # MA乖離率の最低ライン（絶対値）。2%未満は「方向性不明」として除外
 
-def apply_exclusions(raws, rule2_threshold=3.0, stock_dual_ma=False):
+def apply_exclusions(raws, rule2_threshold=3.0, stock_dual_ma=False, min_rr=0.0):
     """
     stock_dual_ma=True: 個別銘柄のMA5/25 AND MA25/75 が両方シグナル方向と一致するものだけ通過
+    min_rr: RR最低閾値（0.0=制限なし）
     """
     result = [
         r for r in raws
         if abs(r['change_pct']) <= rule2_threshold
         and abs(r.get('ma_divergence', 0)) >= MIN_DIVERGENCE
+        and r.get('swing_rr', 0) >= min_rr
     ]
     if stock_dual_ma:
         filtered = []
@@ -463,10 +468,11 @@ def run_backtest(all_data_dict, eval_dates, sl_buffer_mult=1.0,
                  nikkei_data=None, use_market_filter=False,
                  nikkei_fast=25, nikkei_slow=75,
                  dual_ma_filter=False, stock_dual_ma=False,
-                 hybrid_ma=False):
+                 hybrid_ma=False, min_rr=0.0,
+                 rr_target_sl=None):
     """
     本格版バックテスト：翌日寄り付きエントリー、TP/SL判定、強制決済
-    sl_buffer_mult:      SL距離の拡張倍率（1.0=そのまま）
+    sl_buffer_mult:      ATRベースSL倍率（1.0=1ATR, 2.0=2ATR ...）
     nikkei_data:         日経平均DataFrameまたはNone
     use_market_filter:   Trueの場合、日経トレンドと逆方向シグナルを除外
     nikkei_fast/slow:    トレンド判定に使うMAの期間
@@ -474,6 +480,9 @@ def run_backtest(all_data_dict, eval_dates, sl_buffer_mult=1.0,
     dual_ma_filter:      TrueならMA5/25 AND MA25/75の両方が一致する日のみ通過
     hybrid_ma:           True=日経デュアルMA一致時は日経方向フィルター、
                          転換期は銘柄デュアルMAフィルターにフォールバック
+    min_rr:              RR最低閾値（0.0=制限なし）
+    rr_target_sl:        目標RRからSLを逆算（例:2.0→SL=TP距離÷2.0）。
+                         Noneの場合はsl_buffer_mult×ATRを使用
     """
     trade_records = []   # 全トレード詳細
     direction_records = []  # 従来の方向的中率用
@@ -513,7 +522,7 @@ def run_backtest(all_data_dict, eval_dates, sl_buffer_mult=1.0,
 
         candidates = [r for r in raws_copy if r.get('swing_rr_valid', False)]
         # hybrid_maの場合は銘柄デュアルMAを後で条件分岐するのでここでは適用しない
-        candidates = apply_exclusions(candidates, stock_dual_ma=(stock_dual_ma and not hybrid_ma))
+        candidates = apply_exclusions(candidates, stock_dual_ma=(stock_dual_ma and not hybrid_ma), min_rr=min_rr)
         if not candidates:
             continue
 
@@ -586,13 +595,22 @@ def run_backtest(all_data_dict, eval_dates, sl_buffer_mult=1.0,
             entry_bar   = future_bars.iloc[0]
             entry_price = float(entry_bar['Open'])
 
-            # SLバッファ適用（エントリー後の実SLを拡張）
-            if sl_level is not None and sl_buffer_mult != 1.0:
-                sl_dist = abs(entry_price - sl_level)
+            # SL計算：RR逆算方式 or ATRバッファ方式
+            atr_val = s.get('atr_val', 0)
+            if rr_target_sl is not None and tp_level is not None and rr_target_sl > 0:
+                # RR逆算：SL = エントリー ± (TP距離 ÷ 目標RR)
+                tp_dist = abs(tp_level - entry_price)
+                sl_dist = tp_dist / rr_target_sl
                 if direction == "買い":
-                    sl_level = entry_price - sl_dist * sl_buffer_mult
+                    sl_level = entry_price - sl_dist
                 else:
-                    sl_level = entry_price + sl_dist * sl_buffer_mult
+                    sl_level = entry_price + sl_dist
+            elif atr_val > 0:
+                # ATRバッファ：SL = エントリー ± (ATR × 倍率)
+                if direction == "買い":
+                    sl_level = entry_price - atr_val * sl_buffer_mult
+                else:
+                    sl_level = entry_price + atr_val * sl_buffer_mult
 
             # 方向的中率用の5日後終値
             if len(future_bars) >= HOLD_DAYS:
@@ -1375,6 +1393,121 @@ if __name__ == '__main__':
               f"{b['n']:>6}{b['win_rate']:>6.1f}%{pf_s(b['pf']):>6}  "
               f"{s['n']:>6}{s['win_rate']:>6.1f}%{pf_s(s['pf']):>6}")
     print("-" * 80)
+
+    # ──── MIN_RR比較（ハイブリッドMAベース） ────
+    MIN_RR_VALUES = [0.0, 0.5, 0.8, 1.0, 1.2, 1.5]
+    rr_results = {}
+    print(f"\n  [MIN_RR比較] 実行中...")
+    for rr_thresh in MIN_RR_VALUES:
+        t, d = run_backtest(
+            all_data, eval_dates, sl_buffer_mult=1.0,
+            nikkei_data=nikkei_data, hybrid_ma=True,
+            min_rr=rr_thresh
+        )
+        rr_results[rr_thresh] = {
+            'trades':  t,
+            'metrics': calc_metrics(t, d),
+            'monthly': calc_monthly_analysis(t),
+        }
+
+    rr_col_w = 10
+    rr_labels = [f"RR>={v}" for v in MIN_RR_VALUES]
+    rr_labels[0] = "制限なし"
+    rr_sep = 20 + rr_col_w * len(MIN_RR_VALUES)
+    print("\n" + "=" * rr_sep)
+    print("【MIN_RR閾値比較（ハイブリッドMAベース、SL×1.0）】")
+    print("=" * rr_sep)
+    print(f"{'指標':<20}" + "".join(f"{lb:>{rr_col_w}}" for lb in rr_labels))
+    print("-" * rr_sep)
+
+    def rr_row(label, key, fmt=".1f"):
+        vals = "".join(f"{f'{rr_results[v]['metrics'][key]:{fmt}}':>{rr_col_w}}" for v in MIN_RR_VALUES)
+        print(f"{label:<20}{vals}")
+
+    def rr_row_calc(label, fn):
+        vals = "".join(f"{fn(rr_results[v]['metrics']):>{rr_col_w}}" for v in MIN_RR_VALUES)
+        print(f"{label:<20}{vals}")
+
+    rr_row("総トレード数",   "n",        "d")
+    rr_row("勝率(%)",       "win_rate",  ".1f")
+    rr_row("プロフィットF", "pf",        ".2f")
+    rr_row_calc("SL到達率(%)",
+                lambda m: f"{m['sl_losses']/m['n']*100:.1f}" if m['n'] > 0 else "-")
+    rr_row("平均損益(%)",   "avg_pnl",   "+.2f")
+    print("-" * rr_sep)
+    print("  ※ハイブリッドMA（日経一致→日経方向、転換期→銘柄デュアルMA）ベース")
+
+    # 月別詳細（制限なし vs RR≥1.0）
+    for rr_thresh, label in [(0.0, "制限なし"), (1.0, "RR>=1.0")]:
+        monthly_r = rr_results[rr_thresh]['monthly']
+        print(f"\n【月別成績（{label}）】")
+        print(f"  {'月':<8}{'全件':>5}{'全PF':>6}  {'買い件':>6}{'買PF':>6}  {'売り件':>6}{'売PF':>6}")
+        print("  " + "-" * 52)
+        for ym, g in monthly_r.items():
+            a, b, s = g['all'], g['buy'], g['sell']
+            def pf_s(v): return f"{v:.2f}" if v != float('inf') else " inf"
+            print(f"  {ym:<8}{a['n']:>5}{pf_s(a['pf']):>6}  "
+                  f"{b['n']:>6}{pf_s(b['pf']):>6}  "
+                  f"{s['n']:>6}{pf_s(s['pf']):>6}")
+        print("  " + "-" * 52)
+
+    # ──── RR逆算SL比較（ハイブリッドMAベース） ────
+    RR_SL_TARGETS = [1.0, 1.5, 2.0, 2.5, 3.0]
+    rr_sl_results = {}
+    print(f"\n  [RR逆算SL比較] 実行中...")
+    for rr_t in RR_SL_TARGETS:
+        t, d = run_backtest(
+            all_data, eval_dates, sl_buffer_mult=1.0,
+            nikkei_data=nikkei_data, hybrid_ma=True,
+            rr_target_sl=rr_t
+        )
+        rr_sl_results[rr_t] = {
+            'trades':  t,
+            'metrics': calc_metrics(t, d),
+            'monthly': calc_monthly_analysis(t),
+        }
+
+    rr_sl_col = 10
+    rr_sl_labels = [f"RR={v}" for v in RR_SL_TARGETS]
+    rr_sl_sep = 20 + rr_sl_col * len(RR_SL_TARGETS)
+    print("\n" + "=" * rr_sl_sep)
+    print("【RR逆算SL比較（ハイブリッドMAベース）】")
+    print("  ※SL = エントリー ± (TP距離 ÷ 目標RR)")
+    print("=" * rr_sl_sep)
+    print(f"{'指標':<20}" + "".join(f"{lb:>{rr_sl_col}}" for lb in rr_sl_labels))
+    print("-" * rr_sl_sep)
+
+    def rr_sl_row(label, key, fmt=".1f"):
+        vals = "".join(f"{f'{rr_sl_results[v]['metrics'][key]:{fmt}}':>{rr_sl_col}}" for v in RR_SL_TARGETS)
+        print(f"{label:<20}{vals}")
+
+    def rr_sl_row_calc(label, fn):
+        vals = "".join(f"{fn(rr_sl_results[v]['metrics']):>{rr_sl_col}}" for v in RR_SL_TARGETS)
+        print(f"{label:<20}{vals}")
+
+    rr_sl_row("総トレード数",   "n",        "d")
+    rr_sl_row("勝率(%)",       "win_rate",  ".1f")
+    rr_sl_row("プロフィットF", "pf",        ".2f")
+    rr_sl_row_calc("SL到達率(%)",
+                   lambda m: f"{m['sl_losses']/m['n']*100:.1f}" if m['n'] > 0 else "-")
+    rr_sl_row("SL到達件数",    "sl_losses", "d")
+    rr_sl_row("平均損益(%)",   "avg_pnl",   "+.2f")
+    print("-" * rr_sl_sep)
+    print("  ※ハイブリッドMAフィルター適用")
+
+    # 月別詳細（RR=2.0）
+    for rr_t, label in [(2.0, "RR=2.0")]:
+        monthly_r = rr_sl_results[rr_t]['monthly']
+        print(f"\n【月別成績（{label} RR逆算SL）】")
+        print(f"  {'月':<8}{'全件':>5}{'全PF':>6}  {'買い件':>6}{'買PF':>6}  {'売り件':>6}{'売PF':>6}")
+        print("  " + "-" * 52)
+        for ym, g in monthly_r.items():
+            a, b, s = g['all'], g['buy'], g['sell']
+            def pf_s(v): return f"{v:.2f}" if v != float('inf') else " inf"
+            print(f"  {ym:<8}{a['n']:>5}{pf_s(a['pf']):>6}  "
+                  f"{b['n']:>6}{pf_s(b['pf']):>6}  "
+                  f"{s['n']:>6}{pf_s(s['pf']):>6}")
+        print("  " + "-" * 52)
 
     # ──── CSV出力 ────
     # 全バッファの明細を1ファイルに統合

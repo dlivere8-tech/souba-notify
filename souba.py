@@ -552,23 +552,35 @@ for i, r in enumerate(all_results):
     buy_rr_valid  = (r['buy_tp_price']  is not None and r['rr_buy_raw']  > 0)
     sell_rr_valid = (r['sell_tp_price'] is not None and r['rr_sell_raw'] > 0)
 
+    RR_TARGET = 1.0  # 目標RR（SL逆算用）
+
     if buy_score >= sell_score:
+        tp = r['buy_tp_price']
+        tp_dist = (tp - curr) if tp is not None else 0
+        rr_sl = (curr - tp_dist / RR_TARGET) if tp_dist > 0 else None
         r['swing_direction'] = "買い"
         r['swing_score']     = round(buy_score, 1)
-        r['swing_sup']       = r['buy_sl_price']
-        r['swing_res']       = r['buy_tp_price']
-        r['swing_sup_str']   = r['buy_sl_str']
+        r['swing_sup']       = rr_sl              # RR=1.0逆算SL（実用損切り）
+        r['swing_res']       = tp
+        r['swing_sup_str']   = 0                  # 計算値なので★なし
         r['swing_res_str']   = r['buy_tp_str']
-        r['swing_rr']        = r['rr_buy_raw']
+        r['swing_hvn_sup']   = r['buy_sl_price']  # HVN下値めど（参考）
+        r['swing_hvn_str']   = r['buy_sl_str']
+        r['swing_rr']        = RR_TARGET
         r['swing_rr_valid']  = buy_rr_valid
     else:
+        tp = r['sell_tp_price']
+        tp_dist = (curr - tp) if tp is not None else 0
+        rr_sl = (curr + tp_dist / RR_TARGET) if tp_dist > 0 else None
         r['swing_direction'] = "売り"
         r['swing_score']     = round(sell_score, 1)
-        r['swing_sup']       = r['sell_sl_price']
-        r['swing_res']       = r['sell_tp_price']
-        r['swing_sup_str']   = r['sell_sl_str']
+        r['swing_sup']       = rr_sl              # RR=1.0逆算SL（実用損切り）
+        r['swing_res']       = tp
+        r['swing_sup_str']   = 0                  # 計算値なので★なし
         r['swing_res_str']   = r['sell_tp_str']
-        r['swing_rr']        = r['rr_sell_raw']
+        r['swing_hvn_sup']   = r['sell_sl_price'] # HVN上値めど（参考）
+        r['swing_hvn_str']   = r['sell_sl_str']
+        r['swing_rr']        = RR_TARGET
         r['swing_rr_valid']  = sell_rr_valid
 
     r['macd_score']     = macd_score
@@ -863,10 +875,15 @@ def build_swing_table(results, earnings_flags, mismatch_codes=None, market_trend
 
         # ラインの強度表示（★）
         res_str = f"利:{d['swing_res']:,.0f} {strength_stars(d.get('swing_res_str',1))}" if d['swing_res'] else "利:-"
-        sup_str = f"損:{d['swing_sup']:,.0f} {strength_stars(d.get('swing_sup_str',1))}" if d['swing_sup'] else "損:-"
+        # 損切り（RR=1.0逆算）
+        sup_str  = f"損:{d['swing_sup']:,.0f}" if d['swing_sup'] else "損:-"
+        # HVN下値めど（参考）
+        hvn_val  = d.get('swing_hvn_sup')
+        hvn_str  = f"めど:{hvn_val:,.0f} {strength_stars(d.get('swing_hvn_str',1))}" if hvn_val else ""
 
         score_str    = str(d['swing_score'])
-        rr_str       = f"RR:{d['swing_rr']:.1f}" if d['swing_rr'] > 0 else "RR:-"
+        # TP距離を%で表示（RR=1.0なので損切りも同距離）
+        tp_pct_str   = f"TP:{abs(d['swing_res']-d['price'])/d['price']*100:.1f}%" if d['swing_res'] else ""
         atr_pct_str  = f"%ATR:{d['atr_pct']:.1f}%"
         macd_mark    = "&#9733;" if d.get('macd_score', 0) > 0 else ""
         counter_mark = "&#9660;-10pt逆張り" if d.get('market_counter_trend') else ""
@@ -902,13 +919,15 @@ def build_swing_table(results, earnings_flags, mismatch_codes=None, market_trend
             + f"<div style='font-size:10px;color:#666;'>{rsi_str}</div></td>"
             + f"<td style='padding:5px 4px;border-bottom:1px solid #eee;text-align:right;white-space:nowrap;'>"
             + f"<div style='font-size:11px;font-weight:bold;color:#333;'>{res_str}</div>"
-            + f"<div style='font-size:10px;color:#666;'>{sup_str}</div></td>"
+            + f"<div style='font-size:10px;color:#c62828;'>{sup_str}</div>"
+            + (f"<div style='font-size:9px;color:#999;'>{hvn_str}</div>" if hvn_str else "")
+            + "</td>"
             + f"<td style='padding:5px 4px;border-bottom:1px solid #eee;text-align:right;white-space:nowrap;'>"
             + f"<div style='font-size:12px;font-weight:bold;color:{shinyo_color};'>{shinyo_str}</div>"
             + shinyo_note + "</td>"
             + f"<td style='padding:5px 4px;border-bottom:1px solid #eee;text-align:right;white-space:nowrap;'>"
             + f"<div style='font-size:12px;font-weight:bold;color:{score_color};'>{score_str}</div>"
-            + f"<div style='font-size:10px;color:#666;'>{rr_str}"
+            + f"<div style='font-size:10px;color:#666;'>{tp_pct_str}"
             + (f" <span style='color:#ff6f00;'>{macd_mark}MACD</span>" if macd_mark else "")
             + f"</div>"
             + f"<div style='font-size:9px;color:#888;'>{atr_pct_str}"
