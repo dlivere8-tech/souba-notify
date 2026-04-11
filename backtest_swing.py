@@ -198,21 +198,20 @@ def calc_support_resistance(df, curr, direction, atr_val):
         curr_bin = np.searchsorted(bin_edges[1:], curr)
         curr_bin = min(curr_bin, bins - 1)
 
-        # ATRベースの距離制約（souba.pyと同一）
-        # min: 近すぎるノイズを除外
-        # max: 5日スイングの実効レンジ（ATR×3）に絞る
+        # ATRベースの最小距離制約
+        # SL: 0.5ATR以上離れたサポートのみ
+        # TP: 1.5ATR以上離れたレジスタンスのみ（RR≥1.5を構造的に担保）
         min_sl_dist = atr_val * 0.5
         min_tp_dist = atr_val * 1.5
-        max_dist    = atr_val * 3.0
 
         support_bins = [(i, composite[i], bin_centers[i])
                         for i in range(curr_bin)
-                        if curr - max_dist < bin_centers[i] < curr - min_sl_dist]
+                        if bin_centers[i] < curr - min_sl_dist]
         support_bins.sort(key=lambda x: x[1], reverse=True)
 
         resist_bins = [(i, composite[i], bin_centers[i])
                        for i in range(curr_bin + 1, bins)
-                       if curr + min_tp_dist < bin_centers[i] < curr + max_dist]
+                       if bin_centers[i] > curr + min_tp_dist]
         resist_bins.sort(key=lambda x: x[1], reverse=True)
 
         def strength(score):
@@ -321,30 +320,30 @@ def calc_indicators(df):
         buy_sl,  buy_tp,  _, _ = calc_support_resistance(df, curr, 'buy',  atr_val)
         sell_sl, sell_tp, _, _ = calc_support_resistance(df, curr, 'sell', atr_val)
 
-        # SL：ATR×3内HVN（見つからなければATR×1.5フォールバック）
-        hvn_sl_buy  = buy_sl  if buy_sl  is not None else curr - atr_val * 1.5
-        hvn_sl_sell = sell_sl if sell_sl is not None else curr + atr_val * 1.5
+        # ATRベース実用損切り（エントリー価格 ± 1ATR）
+        atr_sl_buy  = curr - atr_val   # 買い: -1ATR
+        atr_sl_sell = curr + atr_val   # 売り: +1ATR
 
-        # RR計算：HVNベース実RR（TP距離 / SL距離）
-        sl_dist_buy  = abs(curr - hvn_sl_buy)
-        sl_dist_sell = abs(curr - hvn_sl_sell)
-        hvn_rr_buy  = abs(buy_tp  - curr) / sl_dist_buy  if buy_tp  is not None and sl_dist_buy  > 0 else 0.0
-        hvn_rr_sell = abs(curr - sell_tp) / sl_dist_sell if sell_tp is not None and sl_dist_sell > 0 else 0.0
+        # RR計算：ATRベース（実用的RR = TP距離 / 1ATR）
+        atr_rr_buy  = abs(buy_tp  - curr) / atr_val if atr_val > 0 and buy_tp  is not None else 0.0
+        atr_rr_sell = abs(curr - sell_tp) / atr_val if atr_val > 0 and sell_tp is not None else 0.0
 
         return {
             'curr':          curr,
             'change_pct':    change_pct,
             'rsi':           rsi,
             'ma_divergence': ma_divergence,
-            'ma5_25_bull':   ma5_25_bull,
+            'ma5_25_bull':   ma5_25_bull,   # MA5>MA25(短期↑)
             'atr_val':       atr_val,
             'pct_b':         pct_b,
-            'rr_buy_raw':    hvn_rr_buy,    # HVN実RR（TP距離/SL距離）
-            'rr_sell_raw':   hvn_rr_sell,
+            'rr_buy_raw':    atr_rr_buy,    # ATRベースRR（実用値）
+            'rr_sell_raw':   atr_rr_sell,   # ATRベースRR（実用値）
             'sup_price':     sell_tp,       # 売り利確（HVN）
             'res_price':     buy_tp,        # 買い利確（HVN）
-            'buy_sl_price':  hvn_sl_buy,    # 買い損切（ATR×3内HVN）
-            'sell_sl_price': hvn_sl_sell,   # 売り損切（ATR×3内HVN）
+            'buy_sl_price':  atr_sl_buy,    # 買い損切（ATR×1.0）
+            'sell_sl_price': atr_sl_sell,   # 売り損切（ATR×1.0）
+            'hvn_sup':       buy_sl,        # HVN下値めど（参考）
+            'hvn_res':       sell_sl,       # HVN上値めど（参考）
             '_closes':       closes,
             '_df':           df,
         }
