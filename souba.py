@@ -365,6 +365,7 @@ def calc_raw(code, name):
         df = df.reset_index()
 
         df['RSI']  = ta.rsi(df['Close'], length=14)
+        df['MA5']  = df['Close'].rolling(5).mean()
         df['MA25'] = df['Close'].rolling(25).mean()
         df['MA75'] = df['Close'].rolling(75).mean()
         atr_series = ta.atr(df['High'], df['Low'], df['Close'], length=14)
@@ -376,10 +377,12 @@ def calc_raw(code, name):
 
         change_pct = ((curr - df.iloc[-2]['Close']) / df.iloc[-2]['Close'] * 100 if len(df) >= 2 else 0.0)
 
+        ma5  = latest['MA5']
         ma25 = latest['MA25']
         ma75 = latest['MA75']
         ma_divergence = (ma25 - ma75) / ma75 * 100 if not pd.isna(ma25) and not pd.isna(ma75) and ma75 != 0 else 0.0
         trend = '上昇' if ma_divergence > 0 else '下降'
+        ma5_25_bull = (bool(ma5 >= ma25) if not pd.isna(ma5) and not pd.isna(ma25) else False)
         atr_val = atr_series.dropna().iloc[-1] if atr_series is not None and not atr_series.isna().all() else 0
 
         # 【変更④】%ATRフィルター：0.8%未満はスイング除外フラグ
@@ -455,6 +458,7 @@ def calc_raw(code, name):
             'rsi':              rsi,
             'trend':            trend,
             'ma_divergence':    ma_divergence,
+            'ma5_25_bull':      ma5_25_bull,
             'atr_pct':          atr_pct,
             'low_volatility':   low_volatility,
             # デイトレ
@@ -602,6 +606,27 @@ def get_nikkei_trend(fast=10, slow=25):
     except:
         return None
 
+def get_nikkei_dual_ma():
+    """
+    デュアルMAフィルター：MA5/25 AND MA25/75 の両方が一致する方向を返す
+    一致：'買い' or '売り'
+    不一致（転換期）：'転換期'
+    取得失敗：None
+    """
+    try:
+        df = yf.Ticker("^N225").history(period="6mo", auto_adjust=False)
+        if df.empty or len(df) < 75:
+            return None
+        closes = df['Close'].values.astype(float)
+        trend_short = '買い' if closes[-5:].mean()  >= closes[-25:].mean()  else '売り'
+        trend_long  = '買い' if closes[-25:].mean() >= closes[-75:].mean() else '売り'
+        if trend_short == trend_long:
+            return trend_short   # 両方一致
+        else:
+            return '転換期'      # 不一致→休む
+    except:
+        return None
+
 # ========================================
 # TOP10選出
 # 【変更④】%ATRフィルター：低ボラ銘柄をスイング対象から除外
@@ -623,18 +648,39 @@ swing_valid = [
 ]
 
 nikkei_market_trend = get_nikkei_trend(fast=10, slow=25)
-if nikkei_market_trend is not None:
+nikkei_dual_ma      = get_nikkei_dual_ma()
+
+# ハイブリッドMAフィルター適用
+# 日経MA一致 → その方向のみ通過（日経デュアルMAフィルター）
+# 転換期（不一致）→ 銘柄デュアルMAフォールバック（各銘柄のMA5/25 AND MA25/75 が一致する銘柄のみ、方向フリー）
+# 取得失敗 → フィルターなし（従来通り）
+if nikkei_dual_ma == '転換期':
+    # 銘柄レベルのデュアルMAフィルター：MA5/25 AND MA25/75 両方一致の銘柄のみ
+    swing_valid_filtered = []
     for r in swing_valid:
+        direction  = r['swing_direction']
+        ma25_75_ok = (r['ma_divergence'] > 0) if direction == '買い' else (r['ma_divergence'] < 0)
+        ma5_25_ok  = r.get('ma5_25_bull', False) if direction == '買い' else (not r.get('ma5_25_bull', True))
+        if ma25_75_ok and ma5_25_ok:
+            swing_valid_filtered.append(r)
+elif nikkei_dual_ma in ('買い', '売り'):
+    swing_valid_filtered = [r for r in swing_valid if r['swing_direction'] == nikkei_dual_ma]
+else:
+    swing_valid_filtered = swing_valid  # 取得失敗時はフィルターなし
+
+# 既存の逆張りペナルティ（デュアルMAが有効な場合のみ適用）
+if nikkei_market_trend is not None:
+    for r in swing_valid_filtered:
         if r['swing_direction'] != nikkei_market_trend:
             r['swing_score'] = round(r['swing_score'] - 10, 1)
             r['market_counter_trend'] = True
         else:
             r['market_counter_trend'] = False
 else:
-    for r in swing_valid:
+    for r in swing_valid_filtered:
         r['market_counter_trend'] = False
 
-swing_top10 = sorted(swing_valid, key=lambda x: x['swing_score'], reverse=True)[:10]
+swing_top10 = sorted(swing_valid_filtered, key=lambda x: x['swing_score'], reverse=True)[:10]
 
 dt_dir_map    = {r['code']: r['dt_direction']    for r in dt_top10}
 swing_dir_map = {r['code']: r['swing_direction'] for r in swing_top10}
@@ -768,8 +814,21 @@ def build_daytrade_table(results, earnings_flags, mismatch_codes=None):
         "<thead>" + thead + "</thead><tbody>" + tbody + "</tbody></table></div></div>"
     )
 
-def build_swing_table(results, earnings_flags, mismatch_codes=None, market_trend=None):
+def build_swing_table(results, earnings_flags, mismatch_codes=None, market_trend=None, dual_ma_status=None):
     if mismatch_codes is None: mismatch_codes = set()
+
+    # シグナルなしの場合は専用メッセージを返す（転換期でも銘柄MAで候補があれば通常表示）
+    if not results:
+        return (
+            "<div style='margin-top:16px;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.1);'>"
+            "<div style='background:#1a237e;color:#fff;padding:12px 16px;'>"
+            "<h2 style='margin:0;font-size:15px;'>今週のスイング推奨</h2>"
+            "</div>"
+            "<div style='padding:20px 16px;text-align:center;'>"
+            "<p style='font-size:12px;color:#666;margin:0;'>本日は条件を満たす銘柄がありませんでした。</p>"
+            "</div></div>"
+        )
+
     thead = (
         "<tr style='background:#f5f5f5;'>"
         "<th style='padding:5px 4px;text-align:left;font-size:11px;'>銘柄</th>"
@@ -865,12 +924,16 @@ def build_swing_table(results, earnings_flags, mismatch_codes=None, market_trend
         + (f"<p style='margin:4px 0 0;font-size:11px;opacity:0.9;'>📊 市場環境: 日経{'↑上昇' if market_trend=='買い' else '↓下降'}トレンド（逆張りは-10pt）</p>"
            if market_trend else
            "<p style='margin:4px 0 0;font-size:11px;opacity:0.7;'>📊 市場環境: データ取得失敗（ペナルティなし）</p>")
+        + (f"<p style='margin:4px 0 0;font-size:12px;background:rgba(255,150,0,0.3);border-radius:4px;padding:4px 8px;'>⚠️ 日経転換期: MA5/25≠MA25/75 — 個別銘柄MAが揃った銘柄のみ表示</p>"
+           if nikkei_dual_ma == '転換期' else
+           f"<p style='margin:4px 0 0;font-size:11px;opacity:0.9;'>✅ 日経デュアルMA: {'↑上昇' if nikkei_dual_ma=='買い' else '↓下降'}トレンド一致（{nikkei_dual_ma}シグナルのみ通過）</p>"
+           if nikkei_dual_ma in ('買い','売り') else "")
         + "</div><div style='overflow-x:auto;'><table style='width:100%;border-collapse:collapse;'>"
         "<thead>" + thead + "</thead><tbody>" + tbody + "</tbody></table></div></div>"
     )
 
 dt_section    = build_daytrade_table(dt_top10,    earnings_flags, MISMATCH_CODES)
-swing_section = build_swing_table(swing_top10, earnings_flags, MISMATCH_CODES, market_trend=nikkei_market_trend)
+swing_section = build_swing_table(swing_top10, earnings_flags, MISMATCH_CODES, market_trend=nikkei_market_trend, dual_ma_status=nikkei_dual_ma)
 
 html = (
     "<html><body style='font-family:sans-serif;background:#f5f5f5;padding:12px;'>"

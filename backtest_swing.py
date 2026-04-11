@@ -303,12 +303,15 @@ def calc_indicators(df):
 
         rsi = _rsi(closes)
 
+        ma5  = float(np.mean(closes[-5:]))  if n >=  5 else float('nan')
         ma25 = float(np.mean(closes[-25:])) if n >= 25 else float('nan')
         ma75 = float(np.mean(closes[-75:])) if n >= 75 else float('nan')
         if np.isnan(ma75) or ma75 == 0:
             ma_divergence = 0.0
         else:
             ma_divergence = (ma25 - ma75) / ma75 * 100
+        # MA5/25 短期トレンド（デュアルMAフィルター用）
+        ma5_25_bull = (not np.isnan(ma5) and not np.isnan(ma25) and ma5 >= ma25)
 
         atr_val = _atr(highs, lows, closes)
         pct_b   = _bb_pctb(closes)
@@ -329,6 +332,7 @@ def calc_indicators(df):
             'change_pct':    change_pct,
             'rsi':           rsi,
             'ma_divergence': ma_divergence,
+            'ma5_25_bull':   ma5_25_bull,   # MA5>MA25(短期↑)
             'atr_val':       atr_val,
             'pct_b':         pct_b,
             'rr_buy_raw':    rr_buy,
@@ -430,12 +434,25 @@ def score_swing_new(raws):
 
 MIN_DIVERGENCE = 2.0   # MA乖離率の最低ライン（絶対値）。2%未満は「方向性不明」として除外
 
-def apply_exclusions(raws, rule2_threshold=3.0):
-    return [
+def apply_exclusions(raws, rule2_threshold=3.0, stock_dual_ma=False):
+    """
+    stock_dual_ma=True: 個別銘柄のMA5/25 AND MA25/75 が両方シグナル方向と一致するものだけ通過
+    """
+    result = [
         r for r in raws
         if abs(r['change_pct']) <= rule2_threshold
-        and abs(r.get('ma_divergence', 0)) >= MIN_DIVERGENCE  # 乖離率2%未満を除外
+        and abs(r.get('ma_divergence', 0)) >= MIN_DIVERGENCE
     ]
+    if stock_dual_ma:
+        filtered = []
+        for r in result:
+            direction  = r.get('swing_direction')
+            ma25_75_ok = (r.get('ma_divergence', 0) > 0) if direction == '買い' else (r.get('ma_divergence', 0) < 0)
+            ma5_25_ok  = r.get('ma5_25_bull', False)     if direction == '買い' else (not r.get('ma5_25_bull', True))
+            if ma25_75_ok and ma5_25_ok:
+                filtered.append(r)
+        return filtered
+    return result
 
 
 # ─────────────────────────────────────────────
@@ -444,13 +461,19 @@ def apply_exclusions(raws, rule2_threshold=3.0):
 
 def run_backtest(all_data_dict, eval_dates, sl_buffer_mult=1.0,
                  nikkei_data=None, use_market_filter=False,
-                 nikkei_fast=25, nikkei_slow=75):
+                 nikkei_fast=25, nikkei_slow=75,
+                 dual_ma_filter=False, stock_dual_ma=False,
+                 hybrid_ma=False):
     """
     本格版バックテスト：翌日寄り付きエントリー、TP/SL判定、強制決済
     sl_buffer_mult:      SL距離の拡張倍率（1.0=そのまま）
     nikkei_data:         日経平均DataFrameまたはNone
     use_market_filter:   Trueの場合、日経トレンドと逆方向シグナルを除外
     nikkei_fast/slow:    トレンド判定に使うMAの期間
+    stock_dual_ma:       Trueなら個別銘柄のMA5/25 AND MA25/75 両方一致のみ通過
+    dual_ma_filter:      TrueならMA5/25 AND MA25/75の両方が一致する日のみ通過
+    hybrid_ma:           True=日経デュアルMA一致時は日経方向フィルター、
+                         転換期は銘柄デュアルMAフィルターにフォールバック
     """
     trade_records = []   # 全トレード詳細
     direction_records = []  # 従来の方向的中率用
@@ -489,17 +512,54 @@ def run_backtest(all_data_dict, eval_dates, sl_buffer_mult=1.0,
         score_swing_new(raws_copy)
 
         candidates = [r for r in raws_copy if r.get('swing_rr_valid', False)]
-        candidates = apply_exclusions(candidates)
+        # hybrid_maの場合は銘柄デュアルMAを後で条件分岐するのでここでは適用しない
+        candidates = apply_exclusions(candidates, stock_dual_ma=(stock_dual_ma and not hybrid_ma))
         if not candidates:
             continue
 
         # 市場環境フィルター：日経トレンドと逆方向シグナルを除外
-        if use_market_filter and nikkei_data is not None:
-            nikkei_trend = calc_nikkei_trend(nikkei_data, eval_ts,
-                                             fast=nikkei_fast, slow=nikkei_slow)
-            if nikkei_trend is not None:
-                candidates = [r for r in candidates
-                              if r['swing_direction'] == nikkei_trend]
+        if (use_market_filter or hybrid_ma) and nikkei_data is not None:
+            if hybrid_ma:
+                # ハイブリッドMAフィルター：
+                #   日経MA5/25 AND MA25/75 一致 → 日経方向フィルター
+                #   転換期（不一致）→ 銘柄デュアルMA（MA5/25 AND MA25/75両方一致）でフィルター
+                trend_short = calc_nikkei_trend(nikkei_data, eval_ts, fast=5,  slow=25)
+                trend_long  = calc_nikkei_trend(nikkei_data, eval_ts, fast=25, slow=75)
+                if trend_short is not None and trend_long is not None:
+                    if trend_short == trend_long:
+                        # 日経一致 → 日経方向フィルター
+                        candidates = [r for r in candidates
+                                      if r['swing_direction'] == trend_short]
+                    else:
+                        # 転換期 → 銘柄デュアルMAフィルター（方向フリー）
+                        filtered = []
+                        for r in candidates:
+                            direction  = r.get('swing_direction')
+                            ma25_75_ok = (r.get('ma_divergence', 0) > 0) if direction == '買い' \
+                                         else (r.get('ma_divergence', 0) < 0)
+                            ma5_25_ok  = r.get('ma5_25_bull', False) if direction == '買い' \
+                                         else (not r.get('ma5_25_bull', True))
+                            if ma25_75_ok and ma5_25_ok:
+                                filtered.append(r)
+                        candidates = filtered
+            elif dual_ma_filter:
+                # デュアルMAフィルター：MA5/25 AND MA25/75 両方が一致する方向のみ通過
+                trend_short = calc_nikkei_trend(nikkei_data, eval_ts, fast=5,  slow=25)
+                trend_long  = calc_nikkei_trend(nikkei_data, eval_ts, fast=25, slow=75)
+                if trend_short is not None and trend_long is not None:
+                    if trend_short == trend_long:
+                        # 両方一致 → その方向のシグナルのみ通過
+                        candidates = [r for r in candidates
+                                      if r['swing_direction'] == trend_short]
+                    else:
+                        # 不一致（転換期）→ 全シグナル除外
+                        candidates = []
+            else:
+                nikkei_trend = calc_nikkei_trend(nikkei_data, eval_ts,
+                                                 fast=nikkei_fast, slow=nikkei_slow)
+                if nikkei_trend is not None:
+                    candidates = [r for r in candidates
+                                  if r['swing_direction'] == nikkei_trend]
             if not candidates:
                 continue
 
@@ -1150,6 +1210,43 @@ if __name__ == '__main__':
             'metrics': calc_metrics(trades_f, dir_recs_f),
             'monthly': calc_monthly_analysis(trades_f),
         }
+
+    # 日経デュアルMAフィルター（MA5/25 AND MA25/75 日経で両方一致のみ）
+    print(f"  [日経デュアルMA] 実行中...", end="\r")
+    trades_dual, dir_recs_dual = run_backtest(
+        all_data, eval_dates, sl_buffer_mult=1.0,
+        nikkei_data=nikkei_data, use_market_filter=True,
+        dual_ma_filter=True
+    )
+    filter_results["日経デュアルMA"] = {
+        'trades':  trades_dual,
+        'metrics': calc_metrics(trades_dual, dir_recs_dual),
+        'monthly': calc_monthly_analysis(trades_dual),
+    }
+
+    # 個別銘柄デュアルMAフィルター（各銘柄のMA5/25 AND MA25/75 が両方一致のみ通過）
+    print(f"  [銘柄デュアルMA] 実行中...", end="\r")
+    trades_sdual, dir_recs_sdual = run_backtest(
+        all_data, eval_dates, sl_buffer_mult=1.0,
+        stock_dual_ma=True
+    )
+    filter_results["銘柄デュアルMA"] = {
+        'trades':  trades_sdual,
+        'metrics': calc_metrics(trades_sdual, dir_recs_sdual),
+        'monthly': calc_monthly_analysis(trades_sdual),
+    }
+
+    # ハイブリッドMAフィルター（日経一致→日経方向フィルター、転換期→銘柄デュアルMAフォールバック）
+    print(f"  [ハイブリッドMA] 実行中...", end="\r")
+    trades_hybrid, dir_recs_hybrid = run_backtest(
+        all_data, eval_dates, sl_buffer_mult=1.0,
+        nikkei_data=nikkei_data, hybrid_ma=True
+    )
+    filter_results["ハイブリッドMA"] = {
+        'trades':  trades_hybrid,
+        'metrics': calc_metrics(trades_hybrid, dir_recs_hybrid),
+        'monthly': calc_monthly_analysis(trades_hybrid),
+    }
     # 後の表示用に最初のパターンを代表として保持
     trades_f  = filter_results['MA5/25']['trades']
     metrics_f = filter_results['MA5/25']['metrics']
@@ -1194,24 +1291,26 @@ if __name__ == '__main__':
 
     # ──── 市場フィルター MAパターン比較表示 ────
     base = all_metrics[1.0]
-    print("\n" + "=" * 76)
+    ALL_FILTER_LABELS = [lb for _, _, lb in MA_PATTERNS] + ["日経デュアルMA", "銘柄デュアルMA", "ハイブリッドMA"]
+    sep_w = 20 + 12 * (1 + len(ALL_FILTER_LABELS))
+    print("\n" + "=" * sep_w)
     print("【市場環境フィルター MAパターン比較（SL×1.0）】")
-    print("=" * 76)
+    print("=" * sep_w)
     col_w = 12
-    header = f"{'指標':<20}{'なし':>{col_w}}" + "".join(f"{lb:>{col_w}}" for _, _, lb in MA_PATTERNS)
+    header = f"{'指標':<20}{'なし':>{col_w}}" + "".join(f"{lb:>{col_w}}" for lb in ALL_FILTER_LABELS)
     print(header)
-    print("-" * 76)
+    print("-" * sep_w)
 
     def frow(label, key, fmt=".1f"):
         base_v = f"{base[key]:{fmt}}"
         vals = "".join(f"{f'{filter_results[lb]['metrics'][key]:{fmt}}':>{col_w}}"
-                       for _, _, lb in MA_PATTERNS)
+                       for lb in ALL_FILTER_LABELS)
         print(f"{label:<20}{base_v:>{col_w}}{vals}")
 
     def frow_calc(label, fn):
         base_v = fn(base)
         vals = "".join(f"{fn(filter_results[lb]['metrics']):>{col_w}}"
-                       for _, _, lb in MA_PATTERNS)
+                       for lb in ALL_FILTER_LABELS)
         print(f"{label:<20}{base_v:>{col_w}}{vals}")
 
     frow("総トレード数",   "n",        "d")
@@ -1222,10 +1321,14 @@ if __name__ == '__main__':
               lambda m: f"{m['sl_losses']/m['n']*100:.1f}" if m['n'] > 0 else "-")
     frow("平均損益(%)",   "avg_pnl",   "+.2f")
     frow("方向的中率(%)", "dir_rate",  ".1f")
-    print("-" * 76)
+    print("-" * sep_w)
+    print("  ※日経デュアルMA = 日経MA5/25 AND MA25/75 両方一致の日のみトレード（不一致＝転換期は休む）")
+    print("  ※銘柄デュアルMA = 各銘柄のMA5/25 AND MA25/75 両方一致の銘柄のみトレード")
+    print("  ※ハイブリッドMA = 日経一致時→日経方向フィルター、転換期→銘柄デュアルMAフォールバック")
 
     # 各パターンの月別買い/売り件数を表示
-    for _, _, lb in MA_PATTERNS:
+    # MA25/75・日経デュアルMA・銘柄デュアルMA・ハイブリッドMAの月別詳細表示
+    for lb in ["MA25/75", "日経デュアルMA", "銘柄デュアルMA", "ハイブリッドMA"]:
         monthly_f = filter_results[lb]['monthly']
         print(f"\n【月別成績（{lb}フィルター）】")
         print(f"  {'月':<8}{'全件':>5}{'全PF':>6}  {'買い件':>6}{'買PF':>6}  {'売り件':>6}{'売PF':>6}")
