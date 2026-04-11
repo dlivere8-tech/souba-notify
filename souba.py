@@ -844,10 +844,11 @@ def build_swing_table(results, earnings_flags, mismatch_codes=None, market_trend
 
     thead = (
         "<tr style='background:#f5f5f5;'>"
-        "<th style='padding:5px 4px;text-align:left;font-size:11px;width:26%;'>銘柄</th>"
+        "<th style='padding:5px 4px;text-align:left;font-size:11px;'>銘柄</th>"
         "<th style='padding:5px 4px;text-align:right;font-size:11px;white-space:nowrap;'>株価</th>"
         "<th style='padding:5px 4px;text-align:right;font-size:11px;white-space:nowrap;'>売買</th>"
         "<th style='padding:5px 4px;text-align:right;font-size:11px;white-space:nowrap;'>目安</th>"
+        "<th style='padding:5px 4px;text-align:right;font-size:11px;white-space:nowrap;'>信用</th>"
         "<th style='padding:5px 4px;text-align:right;font-size:11px;white-space:nowrap;'>点数</th>"
         "</tr>"
     )
@@ -916,14 +917,15 @@ def build_swing_table(results, earnings_flags, mismatch_codes=None, market_trend
             + f"<div style='font-size:10px;color:{pct_color};font-weight:bold;'>{pct_str}</div></td>"
             + f"<td style='padding:5px 4px;border-bottom:1px solid #eee;text-align:right;white-space:nowrap;'>"
             + f"<div style='font-size:12px;font-weight:bold;color:{dir_color};'>{dir_label}</div>"
-            + f"<div style='font-size:10px;color:#666;'>{rsi_str}</div>"
-            + f"<div style='font-size:10px;font-weight:bold;color:{shinyo_color};'>{shinyo_str}</div>"
-            + shinyo_note + "</td>"
+            + f"<div style='font-size:10px;color:#666;'>{rsi_str}</div></td>"
             + f"<td style='padding:5px 4px;border-bottom:1px solid #eee;text-align:right;white-space:nowrap;'>"
             + f"<div style='font-size:11px;font-weight:bold;color:#333;'>{res_str}</div>"
             + f"<div style='font-size:10px;color:#c62828;'>{sup_str}</div>"
             + (f"<div style='font-size:9px;color:#999;'>{hvn_str}</div>" if hvn_str else "")
             + "</td>"
+            + f"<td style='padding:5px 4px;border-bottom:1px solid #eee;text-align:right;white-space:nowrap;'>"
+            + f"<div style='font-size:12px;font-weight:bold;color:{shinyo_color};'>{shinyo_str}</div>"
+            + shinyo_note + "</td>"
             + f"<td style='padding:5px 4px;border-bottom:1px solid #eee;text-align:right;white-space:nowrap;'>"
             + f"<div style='font-size:12px;font-weight:bold;color:{score_color};'>{score_str}</div>"
             + f"<div style='font-size:10px;color:#666;'>{tp_pct_str}"
