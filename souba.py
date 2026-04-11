@@ -554,10 +554,11 @@ for i, r in enumerate(all_results):
 
     RR_TARGET = 1.0  # 目標RR（SL逆算用）
 
+    price = r['price']
     if buy_score >= sell_score:
         tp = r['buy_tp_price']
-        tp_dist = (tp - curr) if tp is not None else 0
-        rr_sl = (curr - tp_dist / RR_TARGET) if tp_dist > 0 else None
+        tp_dist = (tp - price) if tp is not None else 0
+        rr_sl = (price - tp_dist / RR_TARGET) if tp_dist > 0 else None
         r['swing_direction'] = "買い"
         r['swing_score']     = round(buy_score, 1)
         r['swing_sup']       = rr_sl              # RR=1.0逆算SL（実用損切り）
@@ -570,8 +571,8 @@ for i, r in enumerate(all_results):
         r['swing_rr_valid']  = buy_rr_valid
     else:
         tp = r['sell_tp_price']
-        tp_dist = (curr - tp) if tp is not None else 0
-        rr_sl = (curr + tp_dist / RR_TARGET) if tp_dist > 0 else None
+        tp_dist = (price - tp) if tp is not None else 0
+        rr_sl = (price + tp_dist / RR_TARGET) if tp_dist > 0 else None
         r['swing_direction'] = "売り"
         r['swing_score']     = round(sell_score, 1)
         r['swing_sup']       = rr_sl              # RR=1.0逆算SL（実用損切り）
