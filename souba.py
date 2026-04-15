@@ -715,27 +715,25 @@ if (len(swing_valid_filtered) < HENSHO_THRESHOLD
     already     = {r['code'] for r in swing_valid_filtered}
 
     repechage_candidates = []
-    # swing_validより広いall_resultsから探索（スコア50以上・RR有効・乖離率1%以上）
+    # 敗者復活専用pool：逆方向銘柄のみスコア・乖離率を緩和（通常フィルターは影響しない）
     repechage_pool = [
         r for r in all_results
-        if r.get('swing_rr_valid')
+        if r['code'] not in already
+        and r['swing_direction'] == counter_dir   # 逆方向のみ
+        and r.get('swing_rr_valid')
         and abs(r.get('change_pct', 99)) <= 3.0
         and not r.get('low_volatility', True)
-        and r.get('swing_score', 0) >= 50
-        and abs(r.get('ma_divergence', 0)) >= 1.0
+        and r.get('swing_score', 0) >= 50         # 通常60→敗者復活は50
+        and abs(r.get('ma_divergence', 0)) >= 1.0 # 通常2%→敗者復活は1%
     ]
     for r in repechage_pool:
-        if r['code'] in already:
-            continue
-        if r['swing_direction'] != counter_dir:
-            continue
         # MA5/25のみチェック（MA25/75は不問）
         ma5_25_ok = r.get('ma5_25_bull', False) if counter_dir == '買い' \
                     else (not r.get('ma5_25_bull', True))
         if ma5_25_ok:
-            r['market_counter_trend'] = True   # 逆張りペナルティ付与
+            r['market_counter_trend'] = True
             r['swing_score']          = round(r['swing_score'] - 10, 1)
-            r['repechage']            = True   # 敗者復活フラグ
+            r['repechage']            = True
             repechage_candidates.append(r)
 
     repechage_candidates.sort(key=lambda x: x['swing_score'], reverse=True)
