@@ -954,7 +954,7 @@ def build_swing_table(results, earnings_flags, mismatch_codes=None, market_trend
            "<p style='margin:4px 0 0;font-size:11px;opacity:0.7;'>📊 市場環境: データ取得失敗（ペナルティなし）</p>")
         + (f"<p style='margin:4px 0 0;font-size:12px;background:rgba(255,150,0,0.3);border-radius:4px;padding:4px 8px;'>⚠️ 日経転換期: MA5/25≠MA25/75 — 個別銘柄MAが揃った銘柄のみ表示</p>"
            if nikkei_dual_ma == '転換期' else
-           f"<p style='margin:4px 0 0;font-size:11px;opacity:0.9;'>✅ 日経デュアルMA: {'↑上昇' if nikkei_dual_ma=='買い' else '↓下降'}トレンド一致（{nikkei_dual_ma}シグナルのみ通過）</p>"
+           f"<p style='margin:4px 0 0;font-size:11px;opacity:0.9;'>✅ 日経デュアルMA: {'↑上昇' if nikkei_dual_ma=='買い' else '↓下降'}トレンド一致（{nikkei_dual_ma}順張り通過・逆張りは個別MA揃いのみ）</p>"
            if nikkei_dual_ma in ('買い','売り') else "")
         + "</div><div style='overflow-x:auto;'><table style='width:100%;border-collapse:collapse;'>"
         "<thead>" + thead + "</thead><tbody>" + tbody + "</tbody></table></div></div>"
