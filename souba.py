@@ -715,7 +715,16 @@ if (len(swing_valid_filtered) < HENSHO_THRESHOLD
     already     = {r['code'] for r in swing_valid_filtered}
 
     repechage_candidates = []
-    for r in swing_valid:
+    # swing_validより広いall_resultsから探索（スコア50以上・RR有効・乖離率1%以上）
+    repechage_pool = [
+        r for r in all_results
+        if r.get('swing_rr_valid')
+        and abs(r.get('change_pct', 99)) <= 3.0
+        and not r.get('low_volatility', True)
+        and r.get('swing_score', 0) >= 50
+        and abs(r.get('ma_divergence', 0)) >= 1.0
+    ]
+    for r in repechage_pool:
         if r['code'] in already:
             continue
         if r['swing_direction'] != counter_dir:
