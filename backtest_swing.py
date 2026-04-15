@@ -535,22 +535,26 @@ def run_backtest(all_data_dict, eval_dates, sl_buffer_mult=1.0,
                 trend_short = calc_nikkei_trend(nikkei_data, eval_ts, fast=5,  slow=25)
                 trend_long  = calc_nikkei_trend(nikkei_data, eval_ts, fast=25, slow=75)
                 if trend_short is not None and trend_long is not None:
-                    if trend_short == trend_long:
-                        # 日経一致 → 日経方向フィルター
-                        candidates = [r for r in candidates
-                                      if r['swing_direction'] == trend_short]
-                    else:
-                        # 転換期 → 銘柄デュアルMAフィルター（方向フリー）
-                        filtered = []
-                        for r in candidates:
-                            direction  = r.get('swing_direction')
-                            ma25_75_ok = (r.get('ma_divergence', 0) > 0) if direction == '買い' \
-                                         else (r.get('ma_divergence', 0) < 0)
-                            ma5_25_ok  = r.get('ma5_25_bull', False) if direction == '買い' \
-                                         else (not r.get('ma5_25_bull', True))
-                            if ma25_75_ok and ma5_25_ok:
+                    nikkei_dir = trend_short if trend_short == trend_long else None
+                    filtered = []
+                    for r in candidates:
+                        direction  = r.get('swing_direction')
+                        ma25_75_ok = (r.get('ma_divergence', 0) > 0) if direction == '買い' \
+                                     else (r.get('ma_divergence', 0) < 0)
+                        ma5_25_ok  = r.get('ma5_25_bull', False) if direction == '買い' \
+                                     else (not r.get('ma5_25_bull', True))
+                        stock_ok   = ma25_75_ok and ma5_25_ok
+                        if nikkei_dir is None:
+                            # 転換期：個別デュアルMAが揃えば通過（方向フリー）
+                            if stock_ok:
                                 filtered.append(r)
-                        candidates = filtered
+                        elif direction == nikkei_dir:
+                            # 順張り：無条件通過
+                            filtered.append(r)
+                        elif stock_ok:
+                            # 逆張り：個別デュアルMAが揃えば通過（-10ptペナルティは別途）
+                            filtered.append(r)
+                    candidates = filtered
             elif dual_ma_filter:
                 # デュアルMAフィルター：MA5/25 AND MA25/75 両方が一致する方向のみ通過
                 trend_short = calc_nikkei_trend(nikkei_data, eval_ts, fast=5,  slow=25)

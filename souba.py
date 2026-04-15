@@ -664,20 +664,30 @@ nikkei_market_trend = get_nikkei_trend(fast=10, slow=25)
 nikkei_dual_ma      = get_nikkei_dual_ma()
 
 # ハイブリッドMAフィルター適用
-# 日経MA一致 → その方向のみ通過（日経デュアルMAフィルター）
 # 転換期（不一致）→ 銘柄デュアルMAフォールバック（各銘柄のMA5/25 AND MA25/75 が一致する銘柄のみ、方向フリー）
+# 明確トレンド（一致）→ 順張りは無条件通過、逆張りも個別デュアルMAが揃えば通過（-10ptペナルティあり）
 # 取得失敗 → フィルターなし（従来通り）
-if nikkei_dual_ma == '転換期':
-    # 銘柄レベルのデュアルMAフィルター：MA5/25 AND MA25/75 両方一致の銘柄のみ
+def _stock_dual_ma_ok(r, direction):
+    """銘柄レベルのデュアルMAが指定方向と一致するか"""
+    ma25_75_ok = (r['ma_divergence'] > 0) if direction == '買い' else (r['ma_divergence'] < 0)
+    ma5_25_ok  = r.get('ma5_25_bull', False) if direction == '買い' else (not r.get('ma5_25_bull', True))
+    return ma25_75_ok and ma5_25_ok
+
+if nikkei_dual_ma in ('転換期', '買い', '売り'):
     swing_valid_filtered = []
     for r in swing_valid:
-        direction  = r['swing_direction']
-        ma25_75_ok = (r['ma_divergence'] > 0) if direction == '買い' else (r['ma_divergence'] < 0)
-        ma5_25_ok  = r.get('ma5_25_bull', False) if direction == '買い' else (not r.get('ma5_25_bull', True))
-        if ma25_75_ok and ma5_25_ok:
+        direction = r['swing_direction']
+        if nikkei_dual_ma == '転換期':
+            # 転換期：個別デュアルMAが揃った銘柄のみ（方向フリー）
+            if _stock_dual_ma_ok(r, direction):
+                swing_valid_filtered.append(r)
+        elif direction == nikkei_dual_ma:
+            # 順張り：無条件通過
             swing_valid_filtered.append(r)
-elif nikkei_dual_ma in ('買い', '売り'):
-    swing_valid_filtered = [r for r in swing_valid if r['swing_direction'] == nikkei_dual_ma]
+        else:
+            # 逆張り：個別デュアルMAが揃っている場合のみ通過（-10ptペナルティは下の処理で付与）
+            if _stock_dual_ma_ok(r, direction):
+                swing_valid_filtered.append(r)
 else:
     swing_valid_filtered = swing_valid  # 取得失敗時はフィルターなし
 
