@@ -837,6 +837,183 @@ def calc_direction_trend_analysis(trade_records):
     return {k: _group_metrics(v) for k, v in groups.items()}
 
 
+def run_hensho_analysis(all_data_dict, eval_dates, nikkei_data, threshold=5):
+    """
+    変調検知バックテスト:
+    - ハイブリッドMAフィルター通過件数を日別に集計
+    - threshold未満の日を「変調日」として特定
+    - 変調日の敗者復活候補（逆方向×MA5/25のみ一致）を収集・成績計算
+    - 日経終値と5日後リターンを記録（転換点との重ね合わせ用）
+    """
+    import copy
+    daily_records   = []   # 日別サマリー
+    repechage_trades = []  # 敗者復活候補の個別トレード
+
+    for eval_dt in eval_dates:
+        eval_ts = pd.Timestamp(eval_dt).normalize()
+
+        # ── データスライス＆売買代金Top50 ──
+        slices = {}
+        for code, df_full in all_data_dict.items():
+            df_slice = df_full[df_full.index.normalize() < eval_ts]
+            if len(df_slice) >= HIST_BARS:
+                slices[code] = df_slice
+
+        vol_scores = []
+        for code, df_s in slices.items():
+            recent5 = df_s.tail(5)
+            trade_val = (recent5['Volume'] * recent5['Close']).mean() / 1e8
+            vol_scores.append((code, trade_val))
+        vol_scores.sort(key=lambda x: x[1], reverse=True)
+        top_codes = {code for code, _ in vol_scores[:TOP_VOL]}
+
+        raws = []
+        for code in top_codes:
+            raw = calc_indicators(slices[code])
+            if raw is None:
+                continue
+            raw['code'] = code
+            raws.append(raw)
+
+        if len(raws) < 3:
+            continue
+
+        raws_copy = copy.deepcopy(raws)
+        score_swing_new(raws_copy)
+        candidates = apply_exclusions(raws_copy)
+
+        # ── 日経MA判定 ──
+        trend_short = calc_nikkei_trend(nikkei_data, eval_ts, fast=5,  slow=25)
+        trend_long  = calc_nikkei_trend(nikkei_data, eval_ts, fast=25, slow=75)
+        if trend_short is None or trend_long is None:
+            continue
+
+        nikkei_dir = trend_short if trend_short == trend_long else None  # None=転換期
+
+        # ── ハイブリッドMAフィルター ──
+        filtered_normal = []
+        for r in candidates:
+            direction  = r.get('swing_direction')
+            ma25_75_ok = (r.get('ma_divergence', 0) > 0) if direction == '買い' \
+                         else (r.get('ma_divergence', 0) < 0)
+            ma5_25_ok  = r.get('ma5_25_bull', False) if direction == '買い' \
+                         else (not r.get('ma5_25_bull', True))
+            stock_ok   = ma25_75_ok and ma5_25_ok
+            if nikkei_dir is None:
+                if stock_ok:
+                    filtered_normal.append(r)
+            elif direction == nikkei_dir:
+                filtered_normal.append(r)
+            elif stock_ok:
+                filtered_normal.append(r)
+
+        normal_count = len(filtered_normal)
+
+        # ── 日経終値・5日後リターン ──
+        nk_past = nikkei_data[nikkei_data.index.normalize() <= eval_ts]
+        nk_future = nikkei_data[nikkei_data.index.normalize() > eval_ts]
+        nk_close = float(nk_past['Close'].iloc[-1]) if len(nk_past) > 0 else None
+        nk_5d_return = None
+        if nk_close and len(nk_future) >= 5:
+            nk_5d_return = round((float(nk_future['Close'].iloc[4]) - nk_close) / nk_close * 100, 2)
+
+        # ── 変調日：敗者復活候補を収集 ──
+        is_hensho = (normal_count < threshold) and (nikkei_dir is not None)
+        repechage_count = 0
+        repechage_pnl_list = []
+
+        if is_hensho:
+            counter_dir = '買い' if nikkei_dir == '売り' else '売り'
+            repechage_candidates = sorted(
+                [r for r in candidates if r.get('swing_direction') == counter_dir
+                 and (r.get('ma5_25_bull', False) if counter_dir == '買い'
+                      else not r.get('ma5_25_bull', True))],
+                key=lambda x: x['swing_score'], reverse=True
+            )[:10 - normal_count]  # 不足分だけ
+
+            for r in repechage_candidates:
+                code      = r['code']
+                direction = r.get('swing_direction')
+                tp_level  = r.get('swing_tp')
+                if tp_level is None:
+                    continue
+                df_full   = all_data_dict.get(code)
+                if df_full is None:
+                    continue
+                future_bars = df_full[df_full.index.normalize() > eval_ts]
+                if len(future_bars) < 1:
+                    continue
+
+                entry_price = float(future_bars.iloc[0]['Open'])
+                tp_dist = abs(tp_level - entry_price)
+                sl_level = (entry_price - tp_dist) if direction == '買い' \
+                           else (entry_price + tp_dist)  # RR=1.0
+
+                # TP/SL判定（5日間）
+                hold_bars  = future_bars.head(HOLD_DAYS)
+                result     = None
+                exit_price = None
+                for _, bar in hold_bars.iterrows():
+                    bh, bl = float(bar['High']), float(bar['Low'])
+                    hit_tp = (bh >= tp_level) if direction == '買い' else (bl <= tp_level)
+                    hit_sl = (bl <= sl_level) if direction == '買い' else (bh >= sl_level)
+                    if hit_sl or hit_tp:
+                        if hit_sl and hit_tp:
+                            result, exit_price = 'loss', sl_level
+                        elif hit_sl:
+                            result, exit_price = 'loss', sl_level
+                        else:
+                            result, exit_price = 'win', tp_level
+                        break
+                if result is None:
+                    exit_price = float(hold_bars.iloc[-1]['Close'])
+                    temp = (exit_price - entry_price) if direction == '買い' \
+                           else (entry_price - exit_price)
+                    result = 'forced_win' if temp > 0 else 'forced_loss'
+
+                pnl = (exit_price - entry_price) if direction == '買い' \
+                      else (entry_price - exit_price)
+                pnl_pct = pnl / entry_price * 100
+
+                repechage_count += 1
+                repechage_pnl_list.append(pnl_pct)
+                repechage_trades.append({
+                    'date':         eval_dt.strftime('%Y-%m-%d'),
+                    'code':         code,
+                    'direction':    direction,
+                    'nikkei_dir':   nikkei_dir,
+                    'normal_count': normal_count,
+                    'entry':        round(entry_price, 1),
+                    'tp':           round(tp_level, 1),
+                    'sl':           round(sl_level, 1),
+                    'exit':         round(exit_price, 1),
+                    'result':       result,
+                    'pnl_pct':      round(pnl_pct, 2),
+                    'ma5_25_bull':  r.get('ma5_25_bull'),
+                    'ma_divergence': round(r.get('ma_divergence', 0), 3),
+                    'swing_score':  r.get('swing_score', 0),
+                })
+
+        gains  = sum(p for p in repechage_pnl_list if p > 0)
+        losses = abs(sum(p for p in repechage_pnl_list if p < 0))
+        rep_pf = round(gains / losses, 2) if losses > 0 else (float('inf') if gains > 0 else None)
+
+        daily_records.append({
+            'date':             eval_dt.strftime('%Y-%m-%d'),
+            'nikkei_close':     round(nk_close, 0) if nk_close else None,
+            'nikkei_5d_return': nk_5d_return,
+            'nikkei_dir':       nikkei_dir or '転換期',
+            'normal_count':     normal_count,
+            'is_hensho':        is_hensho,
+            'repechage_count':  repechage_count,
+            'repechage_pf':     rep_pf,
+            'repechage_avg_pnl': round(sum(repechage_pnl_list)/len(repechage_pnl_list), 2)
+                                  if repechage_pnl_list else None,
+        })
+
+    return daily_records, repechage_trades
+
+
 def calc_nikkei_trend(df_nikkei, eval_ts, fast=25, slow=75):
     """
     評価日時点の日経平均トレンドを返す
@@ -1671,6 +1848,76 @@ if __name__ == '__main__':
         print(row)
 
     # ── CSV出力 ──
+    # ──────────────────────────────────────────────────────────────────
+    # [5/5] 変調検知バックテスト（敗者復活候補分析）
+    # ──────────────────────────────────────────────────────────────────
+    print(f"\n{'='*72}")
+    print(f"[5/5] 変調検知バックテスト実行中...")
+    print(f"  閾値: ハイブリッドMA通過 < 10件 → 変調日として敗者復活候補を抽出")
+    print(f"  敗者復活条件: 逆方向 × MA5/25のみ一致（MA25/75は不問）")
+    HENSHO_THRESHOLD = 10
+
+    if nikkei_data is not None:
+        hensho_daily, hensho_trades = run_hensho_analysis(
+            all_data, eval_dates, nikkei_data, threshold=HENSHO_THRESHOLD
+        )
+
+        hensho_days  = [d for d in hensho_daily if d['is_hensho']]
+        normal_days  = [d for d in hensho_daily if not d['is_hensho']]
+
+        print(f"\n{'='*72}")
+        print(f"【変調検知サマリー】")
+        print(f"{'='*72}")
+        print(f"  評価日数計     : {len(hensho_daily)}日")
+        print(f"  通常日(>=5件)  : {len(normal_days)}日  平均通過件数: "
+              f"{sum(d['normal_count'] for d in normal_days)/len(normal_days):.1f}" if normal_days else "")
+        print(f"  変調日(<5件)   : {len(hensho_days)}日")
+        print()
+
+        if hensho_days:
+            print(f"  【変調日一覧】")
+            print(f"  {'日付':<12}{'日経':<8}{'方向':<6}{'通常件数':>6}  {'5日後':>7}  {'敗者復活':>6}  {'復活PF':>7}")
+            print(f"  {'-'*60}")
+            for d in hensho_days:
+                fwd  = f"{d['nikkei_5d_return']:+.1f}%" if d['nikkei_5d_return'] is not None else "  N/A"
+                pf   = f"{d['repechage_pf']:.2f}"       if d['repechage_pf'] is not None      else "  N/A"
+                print(f"  {d['date']:<12}{d['nikkei_close']:<8.0f}{d['nikkei_dir']:<6}"
+                      f"{d['normal_count']:>6}  {fwd:>7}  {d['repechage_count']:>6}件  {pf:>7}")
+
+        if hensho_trades:
+            wins   = [t for t in hensho_trades if t['result'] in ('win', 'forced_win')]
+            losses = [t for t in hensho_trades if t['result'] in ('loss', 'forced_loss')]
+            gains  = sum(t['pnl_pct'] for t in wins)
+            loss_sum = abs(sum(t['pnl_pct'] for t in losses))
+            pf_rep = gains / loss_sum if loss_sum > 0 else float('inf')
+            avg    = sum(t['pnl_pct'] for t in hensho_trades) / len(hensho_trades)
+            print(f"\n  【敗者復活候補 総合成績】")
+            print(f"  総トレード数  : {len(hensho_trades)}件")
+            print(f"  勝率          : {len(wins)/len(hensho_trades)*100:.1f}%")
+            print(f"  プロフィットF : {pf_rep:.2f}")
+            print(f"  平均損益      : {avg:+.2f}%")
+
+        # CSV出力
+        hensho_daily_csv = 'backtest_hensho_daily.csv'
+        with open(hensho_daily_csv, 'w', newline='', encoding='utf-8-sig') as f:
+            writer = csv.DictWriter(f, fieldnames=[
+                'date','nikkei_close','nikkei_5d_return','nikkei_dir',
+                'normal_count','is_hensho','repechage_count','repechage_pf','repechage_avg_pnl'
+            ])
+            writer.writeheader()
+            writer.writerows(hensho_daily)
+        print(f"\n  変調日サマリー: {hensho_daily_csv}")
+
+        if hensho_trades:
+            hensho_trades_csv = 'backtest_hensho_trades.csv'
+            with open(hensho_trades_csv, 'w', newline='', encoding='utf-8-sig') as f:
+                writer = csv.DictWriter(f, fieldnames=list(hensho_trades[0].keys()))
+                writer.writeheader()
+                writer.writerows(hensho_trades)
+            print(f"  敗者復活明細  : {hensho_trades_csv}")
+    else:
+        print("  日経データ未取得のためスキップ")
+
     limit_csv = 'backtest_limit_trades.csv'
     all_limit_trades = []
     for rr in RR_TARGETS:

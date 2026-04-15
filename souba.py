@@ -703,6 +703,35 @@ else:
     for r in swing_valid_filtered:
         r['market_counter_trend'] = False
 
+# ── 変調検知：通過件数が10件未満なら敗者復活（逆方向×MA5/25一致）で補充 ──
+HENSHO_THRESHOLD = 10
+swing_hensho_triggered = False
+
+if (len(swing_valid_filtered) < HENSHO_THRESHOLD
+        and nikkei_dual_ma in ('買い', '売り')):          # 転換期は除外（既に個別MAフォールバック）
+    swing_hensho_triggered = True
+    counter_dir = '買い' if nikkei_dual_ma == '売り' else '売り'
+    needed      = HENSHO_THRESHOLD - len(swing_valid_filtered)
+    already     = {r['code'] for r in swing_valid_filtered}
+
+    repechage_candidates = []
+    for r in swing_valid:
+        if r['code'] in already:
+            continue
+        if r['swing_direction'] != counter_dir:
+            continue
+        # MA5/25のみチェック（MA25/75は不問）
+        ma5_25_ok = r.get('ma5_25_bull', False) if counter_dir == '買い' \
+                    else (not r.get('ma5_25_bull', True))
+        if ma5_25_ok:
+            r['market_counter_trend'] = True   # 逆張りペナルティ付与
+            r['swing_score']          = round(r['swing_score'] - 10, 1)
+            r['repechage']            = True   # 敗者復活フラグ
+            repechage_candidates.append(r)
+
+    repechage_candidates.sort(key=lambda x: x['swing_score'], reverse=True)
+    swing_valid_filtered = swing_valid_filtered + repechage_candidates[:needed]
+
 swing_top10 = sorted(swing_valid_filtered, key=lambda x: x['swing_score'], reverse=True)[:10]
 
 dt_dir_map    = {r['code']: r['dt_direction']    for r in dt_top10}
@@ -837,7 +866,8 @@ def build_daytrade_table(results, earnings_flags, mismatch_codes=None):
         "<thead>" + thead + "</thead><tbody>" + tbody + "</tbody></table></div></div>"
     )
 
-def build_swing_table(results, earnings_flags, mismatch_codes=None, market_trend=None, dual_ma_status=None):
+def build_swing_table(results, earnings_flags, mismatch_codes=None, market_trend=None, dual_ma_status=None,
+                      hensho_triggered=False, all_filtered=None):
     if mismatch_codes is None: mismatch_codes = set()
 
     # シグナルなしの場合は専用メッセージを返す（転換期でも銘柄MAで候補があれば通常表示）
@@ -895,8 +925,9 @@ def build_swing_table(results, earnings_flags, mismatch_codes=None, market_trend
         # TP距離を%で表示（RR=1.0なので損切りも同距離）
         tp_pct_str   = f"TP:{abs(d['swing_res']-d['price'])/d['price']*100:.1f}%" if d['swing_res'] else ""
         atr_pct_str  = f"%ATR:{d['atr_pct']:.1f}%"
-        macd_mark    = "&#9733;" if d.get('macd_score', 0) > 0 else ""
-        counter_mark = "&#9660;-10pt逆張り" if d.get('market_counter_trend') else ""
+        macd_mark     = "&#9733;" if d.get('macd_score', 0) > 0 else ""
+        counter_mark  = "&#9660;-10pt逆張り" if d.get('market_counter_trend') else ""
+        repechage_mark = d.get('repechage', False)
 
         ratio = d.get('shinyo_ratio')
         if ratio is None:
@@ -915,9 +946,11 @@ def build_swing_table(results, earnings_flags, mismatch_codes=None, market_trend
                 shinyo_color = "#333"
                 shinyo_note  = ""
 
+        row_bg = "background:#fffde7;" if repechage_mark else ""
         tbody += (
-            "<tr>"
+            f"<tr style='{row_bg}'>"
             + f"<td style='padding:5px 4px;border-bottom:1px solid #eee;font-size:12px;font-weight:bold;white-space:nowrap;'>"
+            + (f"<span style='color:#f57f17;font-size:10px;'>&#9889;</span>" if repechage_mark else "")
             + f"{i+1}. {d['name']}"
             + f"<span style='font-size:10px;font-weight:normal;color:#888;'> {d['code']}</span>"
             + flags_html + "</td>"
@@ -956,12 +989,16 @@ def build_swing_table(results, earnings_flags, mismatch_codes=None, market_trend
            if nikkei_dual_ma == '転換期' else
            f"<p style='margin:4px 0 0;font-size:11px;opacity:0.9;'>✅ 日経デュアルMA: {'↑上昇' if nikkei_dual_ma=='買い' else '↓下降'}トレンド一致（{nikkei_dual_ma}順張り通過・逆張りは個別MA揃いのみ）</p>"
            if nikkei_dual_ma in ('買い','売り') else "")
+        + (f"<p style='margin:4px 0 0;font-size:12px;background:rgba(255,193,7,0.35);border-radius:4px;padding:4px 8px;font-weight:bold;'>&#9889; 変調検知: 通常通過{len([r for r in (all_filtered or []) if not r.get('repechage')])}件 &mdash; &#9889;マーク銘柄は逆方向敗者復活</p>"
+           if hensho_triggered else "")
         + "</div><div style='overflow-x:auto;'><table style='width:100%;border-collapse:collapse;'>"
         "<thead>" + thead + "</thead><tbody>" + tbody + "</tbody></table></div></div>"
     )
 
 dt_section    = build_daytrade_table(dt_top10,    earnings_flags, MISMATCH_CODES)
-swing_section = build_swing_table(swing_top10, earnings_flags, MISMATCH_CODES, market_trend=nikkei_market_trend, dual_ma_status=nikkei_dual_ma)
+swing_section = build_swing_table(swing_top10, earnings_flags, MISMATCH_CODES,
+                                   market_trend=nikkei_market_trend, dual_ma_status=nikkei_dual_ma,
+                                   hensho_triggered=swing_hensho_triggered, all_filtered=swing_valid_filtered)
 
 html = (
     "<html><body style='font-family:sans-serif;background:#f5f5f5;padding:12px;'>"
