@@ -631,8 +631,11 @@ def get_nikkei_dual_ma():
         if df.empty or len(df) < 75:
             return None
         closes = df['Close'].values.astype(float)
-        trend_short = '買い' if closes[-5:].mean()  >= closes[-25:].mean()  else '売り'
-        trend_long  = '買い' if closes[-25:].mean() >= closes[-75:].mean() else '売り'
+        ma5  = closes[-5:].mean()    # 直近5日移動平均
+        ma25 = closes[-25:].mean()   # 直近25日移動平均
+        ma75 = closes[-75:].mean()   # 直近75日移動平均
+        trend_short = '買い' if ma5  >= ma25 else '売り'
+        trend_long  = '買い' if ma25 >= ma75 else '売り'
         if trend_short == trend_long:
             return trend_short   # 両方一致
         else:
