@@ -614,7 +614,9 @@ def get_nikkei_trend(fast=10, slow=25):
         df = yf.Ticker("^N225").history(period="3mo", auto_adjust=False)
         if df.empty or len(df) < slow:
             return None
-        closes = df['Close'].values.astype(float)
+        closes = df['Close'].dropna().values.astype(float)  # NaN除去
+        if len(closes) < slow:
+            return None
         return '買い' if closes[-fast:].mean() >= closes[-slow:].mean() else '売り'
     except:
         return None
@@ -630,7 +632,9 @@ def get_nikkei_dual_ma():
         df = yf.Ticker("^N225").history(period="6mo", auto_adjust=False)
         if df.empty or len(df) < 75:
             return None
-        closes = df['Close'].values.astype(float)
+        closes = df['Close'].dropna().values.astype(float)  # NaN除去してから計算
+        if len(closes) < 75:
+            return None
         ma5  = closes[-5:].mean()    # 直近5日移動平均
         ma25 = closes[-25:].mean()   # 直近25日移動平均
         ma75 = closes[-75:].mean()   # 直近75日移動平均
@@ -681,8 +685,12 @@ if nikkei_dual_ma in ('転換期', '買い', '売り'):
     for r in swing_valid:
         direction = r['swing_direction']
         if nikkei_dual_ma == '転換期':
-            # 転換期：個別デュアルMAが揃った銘柄のみ（方向フリー）
-            if _stock_dual_ma_ok(r, direction):
+            # 転換期：個別MA5/25のみで判定（MA25/75は不要）
+            # 理由：回復途上の銘柄はMA5>MA25（短期回復）だがMA25<MA75（長期まだ戻ってない）
+            # →MA25/75を要求すると買いシグナルが全滅し売りだらけになるため
+            ma5_25_ok = r.get('ma5_25_bull', False) if direction == '買い' \
+                        else (not r.get('ma5_25_bull', True))
+            if ma5_25_ok:
                 swing_valid_filtered.append(r)
         elif direction == nikkei_dual_ma:
             # 順張り：無条件通過

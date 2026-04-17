@@ -545,8 +545,9 @@ def run_backtest(all_data_dict, eval_dates, sl_buffer_mult=1.0,
                                      else (not r.get('ma5_25_bull', True))
                         stock_ok   = ma25_75_ok and ma5_25_ok
                         if nikkei_dir is None:
-                            # 転換期：個別デュアルMAが揃えば通過（方向フリー）
-                            if stock_ok:
+                            # 転換期：MA5/25のみで判定（MA25/75不要）
+                            # 理由：回復途上の銘柄はMA5>MA25だがMA25<MA75→dual要求すると買い全滅
+                            if ma5_25_ok:
                                 filtered.append(r)
                         elif direction == nikkei_dir:
                             # 順張り：無条件通過
