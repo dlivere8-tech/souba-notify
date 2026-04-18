@@ -1056,3 +1056,94 @@ try:
     print("メール送信完了！")
 except Exception as e:
     print(f"メール送信失敗: {e}")
+
+# ========================================
+# JSON保存（GitHub Pages Webアプリ用）
+# ========================================
+def save_json_results():
+    os.makedirs("docs/data", exist_ok=True)
+    today = datetime.now(pytz.timezone('Asia/Tokyo')).strftime('%Y-%m-%d')
+
+    def _swing_entry(r):
+        tp   = r.get('swing_res')
+        sl   = r.get('swing_sup')
+        price = r['price']
+        tp_pct = round((tp - price) / price * 100, 2) if tp and price else None
+        sl_pct = round((sl - price) / price * 100, 2) if sl and price else None
+        return {
+            'code':          r['code'],
+            'name':          r['name'],
+            'price':         round(float(price), 1) if price else None,
+            'change_pct':    round(float(r.get('change_pct', 0)), 2),
+            'direction':     r['swing_direction'],
+            'score':         float(r['swing_score']),
+            'rsi':           round(float(r.get('rsi', 0)), 1),
+            'shinyo_ratio':  r.get('shinyo_ratio'),
+            'tp_price':      round(float(tp), 1) if tp else None,
+            'sl_price':      round(float(sl), 1) if sl else None,
+            'tp_pct':        tp_pct,
+            'sl_pct':        sl_pct,
+            'tp_strength':   int(r.get('swing_res_str', 0) or 0),
+            'hvn_price':     round(float(r['swing_hvn_sup']), 1) if r.get('swing_hvn_sup') else None,
+            'hvn_strength':  int(r.get('swing_hvn_str', 0) or 0),
+            'atr_pct':       round(float(r.get('atr_pct', 0)), 2),
+            'ma_divergence': round(float(r.get('ma_divergence', 0)), 2),
+            'counter_trend': bool(r.get('market_counter_trend', False)),
+            'repechage':     bool(r.get('repechage', False)),
+            'macd_signal':   bool(r.get('macd_score', 0) > 0),
+        }
+
+    def _dt_entry(r):
+        return {
+            'code':       r['code'],
+            'name':       r['name'],
+            'price':      round(float(r['price']), 1),
+            'change_pct': round(float(r.get('change_pct', 0)), 2),
+            'direction':  r.get('dt_direction', ''),
+            'score':      float(r['daytrade_score']),
+            'rsi':        round(float(r.get('rsi', 0)), 1),
+            'atr_pct':    round(float(r.get('atr_pct', 0)), 2),
+        }
+
+    result = {
+        'date':        today,
+        'generated_at': now_str,
+        'nikkei': {
+            'close':        round(float(nikkei), 1) if nikkei else None,
+            'change_pct':   nk_p,
+            'ma_status':    nikkei_dual_ma or 'N/A',
+            'market_trend': nikkei_market_trend or 'N/A',
+        },
+        'market': {
+            'dow':    {'value': round(float(dow),    1) if dow    else None, 'change_pct': dow_p},
+            'sp500':  {'value': round(float(sp),     1) if sp     else None, 'change_pct': sp_p},
+            'nasdaq': {'value': round(float(nasdaq), 1) if nasdaq else None, 'change_pct': nasdaq_p},
+            'usdjpy': {'value': round(float(usdjpy), 3) if usdjpy else None, 'change_pct': fx_p},
+            'vix':    {'value': round(float(vix),    2) if vix    else None, 'change_pct': vix_p},
+        },
+        'hensho_triggered': swing_hensho_triggered,
+        'swing':    [_swing_entry(r) for r in swing_top10],
+        'daytrade': [_dt_entry(r)    for r in dt_top10],
+    }
+
+    # 日付別ファイル保存
+    fname = f"docs/data/results_{today}.json"
+    with open(fname, 'w', encoding='utf-8') as f:
+        json.dump(result, f, ensure_ascii=False, indent=2)
+
+    # index.json 更新（直近90日分）
+    index_path = "docs/data/index.json"
+    if os.path.exists(index_path):
+        with open(index_path, 'r', encoding='utf-8') as f:
+            index = json.load(f)
+    else:
+        index = {'dates': []}
+    if today not in index['dates']:
+        index['dates'].insert(0, today)
+    index['dates'] = sorted(set(index['dates']), reverse=True)[:90]
+    with open(index_path, 'w', encoding='utf-8') as f:
+        json.dump(index, f, ensure_ascii=False, indent=2)
+
+    print(f"JSON保存完了: {fname}")
+
+save_json_results()

@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SOUBA Screening</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #22263a;
+    --border: #2e3350;
+    --text: #e8eaf6;
+    --text2: #8892b0;
+    --buy: #4caf50;
+    --sell: #f44336;
+    --accent: #5c7cfa;
+    --warn: #ffb74d;
+    --gold: #ffd54f;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; font-size: 14px; }
+  a { color: var(--accent); text-decoration: none; }
+
+  /* ── ヘッダー ── */
+  header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 12px 16px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .logo { font-size: 18px; font-weight: 700; color: var(--accent); letter-spacing: 1px; }
+  .date-nav { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+  .date-nav select { background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; font-size: 13px; cursor: pointer; }
+  .btn-nav { background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 6px 10px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+  .btn-nav:hover { background: var(--border); }
+
+  /* ── マーケットバー ── */
+  .market-bar { display: flex; gap: 8px; padding: 10px 16px; overflow-x: auto; background: var(--surface); border-bottom: 1px solid var(--border); }
+  .market-item { display: flex; flex-direction: column; align-items: flex-end; min-width: 80px; flex-shrink: 0; }
+  .market-item .label { font-size: 10px; color: var(--text2); }
+  .market-item .val { font-size: 13px; font-weight: 600; }
+  .market-item .chg { font-size: 11px; }
+  .up { color: #ff6b6b; }
+  .down { color: #4fc3f7; }
+  .flat { color: var(--text2); }
+
+  /* ── ステータスバー ── */
+  .status-bar { padding: 8px 16px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+  .badge-tenkan { background: rgba(255,183,77,0.2); color: var(--warn); border: 1px solid var(--warn); }
+  .badge-buy    { background: rgba(76,175,80,0.2); color: var(--buy); border: 1px solid var(--buy); }
+  .badge-sell   { background: rgba(244,67,54,0.2); color: var(--sell); border: 1px solid var(--sell); }
+  .badge-hensho { background: rgba(255,183,77,0.25); color: #ffcc02; border: 1px solid #ffcc02; }
+
+  /* ── タブ ── */
+  .tabs { display: flex; gap: 0; padding: 0 16px; border-bottom: 1px solid var(--border); margin-top: 8px; }
+  .tab { padding: 10px 20px; cursor: pointer; color: var(--text2); font-weight: 600; font-size: 13px; border-bottom: 2px solid transparent; transition: all .2s; }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  /* ── テーブル ── */
+  .table-wrap { padding: 0 16px 80px; overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+  th { background: var(--surface2); color: var(--text2); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; padding: 8px 10px; text-align: left; white-space: nowrap; position: sticky; top: 0; z-index: 2; }
+  td { padding: 10px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; white-space: nowrap; }
+  tr:hover td { background: var(--surface2); cursor: pointer; }
+  .rank { color: var(--text2); font-size: 12px; width: 28px; }
+  .code { font-size: 11px; color: var(--text2); }
+  .name { font-weight: 600; font-size: 13px; }
+  .price-cell .price { font-weight: 700; font-size: 14px; }
+  .price-cell .chg { font-size: 11px; }
+  .dir-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 700; }
+  .dir-buy  { background: rgba(76,175,80,0.2); color: var(--buy); }
+  .dir-sell { background: rgba(244,67,54,0.2); color: var(--sell); }
+
+  /* スコアセル */
+  .score-cell { display: flex; align-items: center; gap: 6px; }
+  .score-val { font-size: 16px; font-weight: 700; color: var(--accent); min-width: 36px; }
+  .sparkline-wrap { display: flex; align-items: center; }
+
+  /* TP/SL */
+  .tp  { color: var(--buy); font-weight: 600; }
+  .sl  { color: var(--sell); }
+  .hvn { color: var(--text2); font-size: 11px; }
+  .pct { font-size: 11px; margin-left: 3px; }
+  .stars { color: var(--gold); font-size: 10px; letter-spacing: -1px; }
+
+  /* フラグ */
+  .flag { font-size: 10px; padding: 1px 5px; border-radius: 3px; display: inline-block; }
+  .flag-macd    { background: rgba(92,124,250,0.25); color: var(--accent); }
+  .flag-counter { background: rgba(244,67,54,0.15); color: var(--sell); }
+  .flag-repechage { background: rgba(255,183,77,0.2); color: var(--warn); }
+
+  /* モーダル（チャート） */
+  .modal-backdrop { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 100; align-items: center; justify-content: center; }
+  .modal-backdrop.open { display: flex; }
+  .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; width: min(95vw, 900px); padding: 16px; position: relative; }
+  .modal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  .modal-title { font-size: 16px; font-weight: 700; }
+  .modal-close { background: none; border: none; color: var(--text2); font-size: 22px; cursor: pointer; padding: 0 6px; }
+  .modal-close:hover { color: var(--text); }
+  .tv-container { border-radius: 8px; overflow: hidden; }
+
+  /* ローディング */
+  .loading { text-align: center; padding: 60px 20px; color: var(--text2); }
+  .spinner { display: inline-block; width: 32px; height: 32px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; margin-bottom: 12px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* シンヨウ倍率 */
+  .shinyo { font-size: 11px; }
+  .shinyo-high { color: #ff6b6b; }
+  .shinyo-low  { color: #4fc3f7; }
+
+  @media (max-width: 640px) {
+    th.hide-sp, td.hide-sp { display: none; }
+    .score-val { font-size: 14px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">📊 SOUBA</div>
+  <div id="generated-at" style="font-size:12px;color:var(--text2);"></div>
+  <div class="date-nav">
+    <button class="btn-nav" id="btn-prev">◀</button>
+    <select id="date-select"></select>
+    <button class="btn-nav" id="btn-next">▶</button>
+  </div>
+</header>
+
+<div class="market-bar" id="market-bar">
+  <div class="loading" style="padding:4px 0;font-size:12px;">読み込み中...</div>
+</div>
+
+<div class="status-bar" id="status-bar"></div>
+
+<div class="tabs">
+  <div class="tab active" data-tab="swing">スイング</div>
+  <div class="tab" data-tab="daytrade">デイトレ</div>
+</div>
+
+<div class="table-wrap">
+  <div id="loading-main" class="loading">
+    <div class="spinner"></div>
+    <div>データ読み込み中...</div>
+  </div>
+  <table id="swing-table" style="display:none">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>銘柄</th>
+        <th>売買</th>
+        <th>株価</th>
+        <th>スコア</th>
+        <th>利確</th>
+        <th>損切り</th>
+        <th class="hide-sp">RSI</th>
+        <th class="hide-sp">信用</th>
+        <th class="hide-sp">ATR</th>
+      </tr>
+    </thead>
+    <tbody id="swing-tbody"></tbody>
+  </table>
+  <table id="dt-table" style="display:none">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>銘柄</th>
+        <th>売買</th>
+        <th>株価</th>
+        <th>スコア</th>
+        <th class="hide-sp">RSI</th>
+        <th class="hide-sp">ATR</th>
+      </tr>
+    </thead>
+    <tbody id="dt-tbody"></tbody>
+  </table>
+</div>
+
+<!-- チャートモーダル -->
+<div class="modal-backdrop" id="chart-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title" id="chart-title"></div>
+      <button class="modal-close" id="modal-close">✕</button>
+    </div>
+    <div class="tv-container">
+      <div id="tv-widget"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============================================================
+//  状態管理
+// ============================================================
+let allDates  = [];
+let currentIdx = 0;
+let currentData = null;
+let scoreHistory = {};   // code → [score|null, ...]  直近7日
+let currentTab  = 'swing';
+
+// ============================================================
+//  ユーティリティ
+// ============================================================
+const $ = id => document.getElementById(id);
+
+function colorClass(pct) {
+  if (!pct || pct === '-') return 'flat';
+  return String(pct).startsWith('+') ? 'up' : String(pct).startsWith('-') ? 'down' : 'flat';
+}
+
+function stars(n) {
+  n = Math.max(0, Math.min(3, n || 0));
+  return '★'.repeat(n) + '☆'.repeat(3 - n);
+}
+
+function fmtPrice(p) {
+  if (p == null) return '-';
+  return Number(p).toLocaleString('ja-JP', {maximumFractionDigits: 1});
+}
+
+// スコア推移スパークライン（SVG）
+function sparkline(scores, dir) {
+  const valid = scores.filter(s => s != null);
+  if (valid.length < 2) return '<svg width="56" height="22"></svg>';
+  const w = 56, h = 22, pad = 2;
+  const lo = Math.min(...valid) - 3;
+  const hi = Math.max(...valid) + 3;
+  const range = hi - lo || 1;
+  const pts = scores.map((s, i) => {
+    if (s == null) return null;
+    const x = pad + (i / (scores.length - 1)) * (w - pad * 2);
+    const y = h - pad - ((s - lo) / range) * (h - pad * 2);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).filter(Boolean).join(' ');
+  const last = valid[valid.length - 1];
+  const first = valid[0];
+  const color = last > first ? '#4caf50' : last < first ? '#f44336' : '#8892b0';
+  // 最終点に丸
+  const lastIdx = scores.map((s,i)=>s!=null?i:-1).filter(i=>i>=0).pop();
+  const lx = pad + (lastIdx / (scores.length - 1)) * (w - pad * 2);
+  const ly = h - pad - ((last - lo) / range) * (h - pad * 2);
+  return `<svg width="${w}" height="${h}" style="overflow:visible">
+    <polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round"/>
+    <circle cx="${lx.toFixed(1)}" cy="${ly.toFixed(1)}" r="2.5" fill="${color}"/>
+  </svg>`;
+}
+
+// ============================================================
+//  データ取得
+// ============================================================
+async function fetchIndex() {
+  const res = await fetch(`data/index.json?_=${Date.now()}`);
+  return res.ok ? res.json() : { dates: [] };
+}
+
+async function fetchResult(date) {
+  const res = await fetch(`data/results_${date}.json?_=${Date.now()}`);
+  return res.ok ? res.json() : null;
+}
+
+// 直近N日のスコア履歴を構築
+async function buildScoreHistory(dates, n = 7) {
+  const recentDates = dates.slice(0, n);
+  const results = await Promise.all(recentDates.map(d => fetchResult(d).catch(() => null)));
+  const history = {};   // code → {name, scores: [{date,score}]}
+  recentDates.forEach((date, i) => {
+    const r = results[i];
+    if (!r) return;
+    [...(r.swing || []), ...(r.daytrade || [])].forEach(s => {
+      if (!history[s.code]) history[s.code] = { name: s.name, scores: {} };
+      history[s.code].scores[date] = s.score;
+    });
+  });
+  // 日付順配列に変換
+  const out = {};
+  Object.entries(history).forEach(([code, h]) => {
+    out[code] = recentDates.map(d => h.scores[d] ?? null);
+  });
+  return out;
+}
+
+// ============================================================
+//  描画
+// ============================================================
+function renderMarketBar(data) {
+  const m = data.market || {};
+  const items = [
+    { label: '日経',   ...data.nikkei, value: data.nikkei?.close },
+    { label: 'ダウ',   ...m.dow },
+    { label: 'S&P',    ...m.sp500 },
+    { label: 'Nasdaq', ...m.nasdaq },
+    { label: 'ドル円', ...m.usdjpy },
+    { label: 'VIX',    ...m.vix },
+  ];
+  $('market-bar').innerHTML = items.map(it => {
+    const cls = colorClass(it.change_pct);
+    return `<div class="market-item">
+      <span class="label">${it.label}</span>
+      <span class="val ${cls}">${it.value != null ? Number(it.value).toLocaleString('ja-JP',{maximumFractionDigits:2}) : '-'}</span>
+      <span class="chg ${cls}">${it.change_pct || '-'}</span>
+    </div>`;
+  }).join('');
+}
+
+function renderStatusBar(data) {
+  const ma = data.nikkei?.ma_status || '-';
+  let badge = '';
+  if (ma === '転換期') badge = `<span class="badge badge-tenkan">⚠️ 転換期</span>`;
+  else if (ma === '買い') badge = `<span class="badge badge-buy">↑ 上昇トレンド</span>`;
+  else if (ma === '売り') badge = `<span class="badge badge-sell">↓ 下降トレンド</span>`;
+
+  const hensho = data.hensho_triggered
+    ? `<span class="badge badge-hensho">⚡ 変調検知</span>` : '';
+
+  const swingCount = (data.swing || []).length;
+  const buyCount  = (data.swing || []).filter(s => s.direction === '買い').length;
+  const sellCount = swingCount - buyCount;
+  const countBadge = `<span style="font-size:12px;color:var(--text2);">スイング: <span style="color:var(--buy)">${buyCount}買</span> / <span style="color:var(--sell)">${sellCount}売</span></span>`;
+
+  $('status-bar').innerHTML = badge + hensho + countBadge;
+}
+
+function renderSwingTable(data) {
+  const stocks = data.swing || [];
+  const tbody = $('swing-tbody');
+  tbody.innerHTML = stocks.map((s, i) => {
+    const isCounter  = s.counter_trend;
+    const isRepechage = s.repechage;
+    const rowStyle = isRepechage ? 'background:rgba(255,183,77,0.05);' : '';
+
+    const chgCls = s.change_pct > 0 ? 'up' : s.change_pct < 0 ? 'down' : 'flat';
+    const dirCls = s.direction === '買い' ? 'dir-buy' : 'dir-sell';
+
+    // スコア推移
+    const sHist = scoreHistory[s.code] || Array(7).fill(null);
+    const spark  = sparkline(sHist, s.direction);
+
+    // TP/SL
+    const tpStr  = s.tp_price ? `<span class="tp">${fmtPrice(s.tp_price)}</span>
+                    <span class="pct tp">${s.tp_pct != null ? (s.tp_pct>0?'+':'')+s.tp_pct+'%' : ''}</span>
+                    <span class="stars">${stars(s.tp_strength)}</span>` : '-';
+    const slStr  = s.sl_price ? `<span class="sl">${fmtPrice(s.sl_price)}</span>
+                    <span class="pct sl">${s.sl_pct != null ? (s.sl_pct>0?'+':'')+s.sl_pct+'%' : ''}</span>` : '-';
+    const hvnStr = s.hvn_price ? `<div class="hvn">めど:${fmtPrice(s.hvn_price)} <span class="stars" style="font-size:9px">${stars(s.hvn_strength)}</span></div>` : '';
+
+    // 信用倍率
+    let shinyoStr = '-';
+    if (s.shinyo_ratio != null) {
+      const cls = s.shinyo_ratio >= 5 ? 'shinyo-high' : s.shinyo_ratio <= 0.5 ? 'shinyo-low' : '';
+      shinyoStr = `<span class="shinyo ${cls}">${s.shinyo_ratio}倍</span>`;
+    }
+
+    // フラグ
+    const flags = [
+      s.macd_signal  ? '<span class="flag flag-macd">★MACD</span>' : '',
+      isCounter      ? '<span class="flag flag-counter">逆張り</span>' : '',
+      isRepechage    ? '<span class="flag flag-repechage">⚡復活</span>' : '',
+    ].filter(Boolean).join(' ');
+
+    return `<tr style="${rowStyle}" onclick="openChart('${s.code}','${s.name}','${s.direction}')">
+      <td class="rank">${i + 1}</td>
+      <td>
+        <div class="name">${s.name}</div>
+        <div class="code">${s.code} ${flags}</div>
+      </td>
+      <td><span class="dir-badge ${dirCls}">${s.direction}</span></td>
+      <td class="price-cell">
+        <div class="price">${fmtPrice(s.price)}</div>
+        <div class="chg ${chgCls}">${s.change_pct > 0 ? '+' : ''}${s.change_pct}%</div>
+      </td>
+      <td>
+        <div class="score-cell">
+          <span class="score-val">${s.score}</span>
+          <span class="sparkline-wrap">${spark}</span>
+        </div>
+      </td>
+      <td>${tpStr}${hvnStr}</td>
+      <td>${slStr}</td>
+      <td class="hide-sp" style="color:var(--text2)">${s.rsi}</td>
+      <td class="hide-sp">${shinyoStr}</td>
+      <td class="hide-sp" style="color:var(--text2)">${s.atr_pct}%</td>
+    </tr>`;
+  }).join('');
+  $('swing-table').style.display = '';
+}
+
+function renderDtTable(data) {
+  const stocks = data.daytrade || [];
+  const tbody = $('dt-tbody');
+  tbody.innerHTML = stocks.map((s, i) => {
+    const chgCls = s.change_pct > 0 ? 'up' : s.change_pct < 0 ? 'down' : 'flat';
+    const dirCls = s.direction === '買い' ? 'dir-buy' : 'dir-sell';
+    const sHist  = scoreHistory[s.code] || Array(7).fill(null);
+    const spark   = sparkline(sHist, s.direction);
+    return `<tr onclick="openChart('${s.code}','${s.name}','${s.direction}')">
+      <td class="rank">${i + 1}</td>
+      <td>
+        <div class="name">${s.name}</div>
+        <div class="code">${s.code}</div>
+      </td>
+      <td><span class="dir-badge ${dirCls}">${s.direction}</span></td>
+      <td class="price-cell">
+        <div class="price">${fmtPrice(s.price)}</div>
+        <div class="chg ${chgCls}">${s.change_pct > 0 ? '+' : ''}${s.change_pct}%</div>
+      </td>
+      <td>
+        <div class="score-cell">
+          <span class="score-val">${s.score}</span>
+          <span class="sparkline-wrap">${spark}</span>
+        </div>
+      </td>
+      <td class="hide-sp" style="color:var(--text2)">${s.rsi}</td>
+      <td class="hide-sp" style="color:var(--text2)">${s.atr_pct}%</td>
+    </tr>`;
+  }).join('');
+  $('dt-table').style.display = '';
+}
+
+function showTab(tab) {
+  currentTab = tab;
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+  $('swing-table').style.display = tab === 'swing' ? '' : 'none';
+  $('dt-table').style.display    = tab === 'daytrade' ? '' : 'none';
+}
+
+// ============================================================
+//  チャートモーダル
+// ============================================================
+function openChart(code, name, dir) {
+  $('chart-title').textContent = `${name} (${code}) — ${dir}`;
+  const tvCode = `TSE:${code}`;
+  $('tv-widget').innerHTML = `
+    <iframe
+      src="https://www.tradingview.com/chart/?symbol=${tvCode}&interval=D&theme=dark&hide_top_toolbar=0&hide_legend=0&hide_side_toolbar=0"
+      style="width:100%;height:480px;border:none;border-radius:8px;"
+      allowtransparency="true"
+      frameborder="0"
+    ></iframe>`;
+  $('chart-modal').classList.add('open');
+}
+
+$('modal-close').addEventListener('click', () => {
+  $('chart-modal').classList.remove('open');
+  $('tv-widget').innerHTML = '';
+});
+$('chart-modal').addEventListener('click', e => {
+  if (e.target === $('chart-modal')) {
+    $('chart-modal').classList.remove('open');
+    $('tv-widget').innerHTML = '';
+  }
+});
+
+// ============================================================
+//  日付ナビゲーション
+// ============================================================
+async function loadDate(idx) {
+  if (!allDates.length) return;
+  currentIdx = Math.max(0, Math.min(allDates.length - 1, idx));
+  const date = allDates[currentIdx];
+  $('date-select').value = date;
+
+  $('loading-main').style.display = '';
+  $('swing-table').style.display  = 'none';
+  $('dt-table').style.display     = 'none';
+
+  currentData = await fetchResult(date);
+  if (!currentData) {
+    $('loading-main').textContent = 'データが見つかりません';
+    return;
+  }
+  $('loading-main').style.display = 'none';
+
+  $('generated-at').textContent = currentData.generated_at || '';
+  renderMarketBar(currentData);
+  renderStatusBar(currentData);
+  renderSwingTable(currentData);
+  renderDtTable(currentData);
+  showTab(currentTab);
+}
+
+$('btn-prev').addEventListener('click', () => loadDate(currentIdx + 1));
+$('btn-next').addEventListener('click', () => loadDate(currentIdx - 1));
+$('date-select').addEventListener('change', e => {
+  const idx = allDates.indexOf(e.target.value);
+  if (idx >= 0) loadDate(idx);
+});
+
+document.querySelectorAll('.tab').forEach(t => {
+  t.addEventListener('click', () => showTab(t.dataset.tab));
+});
+
+// ============================================================
+//  初期化
+// ============================================================
+(async () => {
+  const index = await fetchIndex();
+  allDates = index.dates || [];
+  if (!allDates.length) {
+    $('loading-main').textContent = 'データがありません。まずsouba.pyを実行してください。';
+    return;
+  }
+
+  const sel = $('date-select');
+  allDates.forEach(d => {
+    const opt = document.createElement('option');
+    opt.value = d;
+    opt.textContent = d;
+    sel.appendChild(opt);
+  });
+
+  // スコア履歴を並行取得（最新7日分）
+  scoreHistory = await buildScoreHistory(allDates, 7);
+
+  await loadDate(0);  // 最新日
+})();
+</script>
+</body>
+</html>
