@@ -479,15 +479,40 @@ $('btn-copy').addEventListener('click', async () => {
 //  チャートモーダル
 // ============================================================
 function openChart(code, name, dir) {
-  $('chart-title').textContent = `${name} (${code}) — ${dir}`;
-  const tvCode = `TSE:${code}`;
-  $('tv-widget').innerHTML = `
-    <iframe
-      src="https://www.tradingview.com/chart/?symbol=${tvCode}&interval=D&theme=dark&hide_top_toolbar=0&hide_legend=0&hide_side_toolbar=0"
-      style="width:100%;height:480px;border:none;border-radius:8px;"
-      allowtransparency="true"
-      frameborder="0"
-    ></iframe>`;
+  $('chart-title').innerHTML =
+    `${name} (${code}) — ${dir} &nbsp;
+     <a href="https://www.tradingview.com/chart/?symbol=TSE:${code}" target="_blank"
+        style="font-size:12px;color:var(--accent);">↗ TradingViewで開く</a>`;
+
+  const containerId = 'tv-chart-container';
+  $('tv-widget').innerHTML = `<div id="${containerId}" style="border-radius:8px;overflow:hidden;"></div>`;
+
+  // TradingView公式ウィジェットAPIで描画
+  const script = document.createElement('script');
+  script.src = 'https://s3.tradingview.com/tv.js';
+  script.onload = () => {
+    new TradingView.widget({
+      container_id:      containerId,
+      symbol:            `TSE:${code}`,
+      interval:          'D',
+      timezone:          'Asia/Tokyo',
+      theme:             'dark',
+      style:             '1',
+      locale:            'ja',
+      width:             '100%',
+      height:            480,
+      allow_symbol_change: false,
+      hide_top_toolbar:  false,
+      save_image:        false,
+    });
+  };
+  // 既にロード済みなら即実行
+  if (window.TradingView) {
+    script.onload();
+  } else {
+    document.head.appendChild(script);
+  }
+
   $('chart-modal').classList.add('open');
 }
 
