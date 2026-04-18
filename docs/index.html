@@ -98,6 +98,12 @@
   .modal-close { background: none; border: none; color: var(--text2); font-size: 22px; cursor: pointer; padding: 0 6px; }
   .modal-close:hover { color: var(--text); }
   .tv-container { border-radius: 8px; overflow: hidden; }
+  .stock-detail { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
+  .detail-box { background: var(--surface2); border-radius: 8px; padding: 12px 16px; }
+  .detail-box .label { font-size: 11px; color: var(--text2); margin-bottom: 4px; }
+  .detail-box .value { font-size: 18px; font-weight: 700; }
+  .tv-open-btn { display: block; width: 100%; padding: 12px; background: var(--accent); color: #fff; border: none; border-radius: 8px; font-size: 14px; font-weight: 700; cursor: pointer; text-align: center; text-decoration: none; transition: opacity .2s; }
+  .tv-open-btn:hover { opacity: 0.85; }
 
   /* ローディング */
   .loading { text-align: center; padding: 60px 20px; color: var(--text2); }
@@ -184,9 +190,7 @@
       <div class="modal-title" id="chart-title"></div>
       <button class="modal-close" id="modal-close">✕</button>
     </div>
-    <div class="tv-container">
-      <div id="tv-widget"></div>
-    </div>
+    <div id="tv-widget"></div>
   </div>
 </div>
 
@@ -479,41 +483,73 @@ $('btn-copy').addEventListener('click', async () => {
 //  チャートモーダル
 // ============================================================
 function openChart(code, name, dir) {
-  $('chart-title').innerHTML =
-    `${name} (${code}) — ${dir} &nbsp;
-     <a href="https://www.tradingview.com/chart/?symbol=TSE:${code}" target="_blank"
-        style="font-size:12px;color:var(--accent);">↗ TradingViewで開く</a>`;
+  // 銘柄情報を取得
+  const s = (currentData?.swing || []).find(x => x.code === code)
+         || (currentData?.daytrade || []).find(x => x.code === code);
+  const dirCls = dir === '買い' ? 'dir-buy' : 'dir-sell';
 
-  const containerId = 'tv-chart-container';
-  $('tv-widget').innerHTML = `<div id="${containerId}" style="border-radius:8px;overflow:hidden;"></div>`;
+  $('chart-title').innerHTML = `<span class="dir-badge ${dirCls}" style="margin-right:8px">${dir}</span>${name} <span style="color:var(--text2);font-size:13px">${code}</span>`;
 
-  // TradingView公式ウィジェットAPIで描画
-  const script = document.createElement('script');
-  script.src = 'https://s3.tradingview.com/tv.js';
-  script.onload = () => {
-    new TradingView.widget({
-      container_id:      containerId,
-      symbol:            `TSE:${code}`,
-      interval:          'D',
-      timezone:          'Asia/Tokyo',
-      theme:             'dark',
-      style:             '1',
-      locale:            'ja',
-      width:             '100%',
-      height:            480,
-      allow_symbol_change: false,
-      hide_top_toolbar:  false,
-      save_image:        false,
-    });
-  };
-  // 既にロード済みなら即実行
-  if (window.TradingView) {
-    script.onload();
-  } else {
-    document.head.appendChild(script);
-  }
+  // スコア推移グラフ（SVG 大きめ）
+  const hist = scoreHistory[code] || [];
+  const sparkBig = hist.length >= 2 ? sparklineLarge(hist) : '';
+
+  // 詳細パネル
+  const tp  = s?.tp_price  ? `<span class="tp">${fmtPrice(s.tp_price)}</span> <span style="font-size:12px;color:var(--buy)">${s.tp_pct!=null?(s.tp_pct>0?'+':'')+s.tp_pct+'%':''}</span>` : '-';
+  const sl  = s?.sl_price  ? `<span class="sl">${fmtPrice(s.sl_price)}</span> <span style="font-size:12px;color:var(--sell)">${s.sl_pct!=null?(s.sl_pct>0?'+':'')+s.sl_pct+'%':''}</span>` : '-';
+  const hvn = s?.hvn_price ? `${fmtPrice(s.hvn_price)} <span class="stars">${stars(s.hvn_strength)}</span>` : '-';
+
+  $('tv-widget').innerHTML = `
+    <div class="stock-detail">
+      <div class="detail-box">
+        <div class="label">現在値</div>
+        <div class="value">${s ? fmtPrice(s.price) : '-'}</div>
+        <div style="font-size:12px;color:var(--text2)">${s ? (s.change_pct>0?'+':'')+s.change_pct+'%' : ''}</div>
+      </div>
+      <div class="detail-box">
+        <div class="label">スコア</div>
+        <div class="value" style="color:var(--accent)">${s?.score ?? '-'}</div>
+        <div style="margin-top:4px">${sparkBig}</div>
+      </div>
+      <div class="detail-box">
+        <div class="label">利確目標</div>
+        <div class="value" style="font-size:15px">${tp}</div>
+        <div style="font-size:11px;color:var(--text2)">HVN ${stars(s?.tp_strength||0)}</div>
+      </div>
+      <div class="detail-box">
+        <div class="label">損切りライン</div>
+        <div class="value" style="font-size:15px">${sl}</div>
+        <div style="font-size:11px;color:var(--text2)">節目: ${hvn}</div>
+      </div>
+    </div>
+    <a class="tv-open-btn" href="https://www.tradingview.com/chart/?symbol=TSE:${code}" target="_blank" rel="noopener">
+      📈 TradingView でチャートを開く
+    </a>`;
 
   $('chart-modal').classList.add('open');
+}
+
+// スコア推移 大きめSVG
+function sparklineLarge(scores) {
+  const valid = scores.filter(s => s != null);
+  if (valid.length < 2) return '';
+  const w = 200, h = 40, pad = 4;
+  const lo = Math.min(...valid) - 2, hi = Math.max(...valid) + 2;
+  const range = hi - lo || 1;
+  const pts = scores.map((s, i) => {
+    if (s == null) return null;
+    const x = pad + (i / (scores.length - 1)) * (w - pad * 2);
+    const y = h - pad - ((s - lo) / range) * (h - pad * 2);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).filter(Boolean).join(' ');
+  const last = valid[valid.length-1], first = valid[0];
+  const color = last > first ? '#4caf50' : last < first ? '#f44336' : '#8892b0';
+  const lx = pad + ((scores.map((s,i)=>s!=null?i:-1).filter(i=>i>=0).pop()) / (scores.length-1)) * (w-pad*2);
+  const ly = h - pad - ((last-lo)/range)*(h-pad*2);
+  return `<svg width="${w}" height="${h}" style="overflow:visible">
+    <polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round"/>
+    <circle cx="${lx.toFixed(1)}" cy="${ly.toFixed(1)}" r="3" fill="${color}"/>
+  </svg>`;
 }
 
 $('modal-close').addEventListener('click', () => {
