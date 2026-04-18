@@ -49,9 +49,12 @@
   .badge-hensho { background: rgba(255,183,77,0.25); color: #ffcc02; border: 1px solid #ffcc02; }
 
   /* ── タブ ── */
-  .tabs { display: flex; gap: 0; padding: 0 16px; border-bottom: 1px solid var(--border); margin-top: 8px; }
+  .tabs { display: flex; gap: 0; padding: 0 16px; border-bottom: 1px solid var(--border); margin-top: 8px; align-items: center; }
   .tab { padding: 10px 20px; cursor: pointer; color: var(--text2); font-weight: 600; font-size: 13px; border-bottom: 2px solid transparent; transition: all .2s; }
   .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .btn-copy { margin-left: auto; background: var(--surface2); border: 1px solid var(--border); color: var(--text2); padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; transition: all .2s; }
+  .btn-copy:hover { background: var(--border); color: var(--text); }
+  .btn-copy.copied { color: var(--buy); border-color: var(--buy); }
 
   /* ── テーブル ── */
   .table-wrap { padding: 0 16px 80px; overflow-x: auto; }
@@ -133,6 +136,7 @@
 <div class="tabs">
   <div class="tab active" data-tab="swing">スイング</div>
   <div class="tab" data-tab="daytrade">デイトレ</div>
+  <button class="btn-copy" id="btn-copy" title="一覧テキストをコピー">📋 コピー</button>
 </div>
 
 <div class="table-wrap">
@@ -339,7 +343,8 @@ function renderSwingTable(data) {
                     <span class="stars">${stars(s.tp_strength)}</span>` : '-';
     const slStr  = s.sl_price ? `<span class="sl">${fmtPrice(s.sl_price)}</span>
                     <span class="pct sl">${s.sl_pct != null ? (s.sl_pct>0?'+':'')+s.sl_pct+'%' : ''}</span>` : '-';
-    const hvnStr = s.hvn_price ? `<div class="hvn">めど:${fmtPrice(s.hvn_price)} <span class="stars" style="font-size:9px">${stars(s.hvn_strength)}</span></div>` : '';
+    // HVN節目：損切り方向のチャート節目（SL列に表示）
+    const hvnStr = s.hvn_price ? `<div class="hvn">節目:${fmtPrice(s.hvn_price)} <span class="stars" style="font-size:9px">${stars(s.hvn_strength)}</span></div>` : '';
 
     // 信用倍率
     let shinyoStr = '-';
@@ -372,8 +377,8 @@ function renderSwingTable(data) {
           <span class="sparkline-wrap">${spark}</span>
         </div>
       </td>
-      <td>${tpStr}${hvnStr}</td>
-      <td>${slStr}</td>
+      <td>${tpStr}</td>
+      <td>${slStr}${hvnStr}</td>
       <td class="hide-sp" style="color:var(--text2)">${s.rsi}</td>
       <td class="hide-sp">${shinyoStr}</td>
       <td class="hide-sp" style="color:var(--text2)">${s.atr_pct}%</td>
@@ -420,6 +425,55 @@ function showTab(tab) {
   $('swing-table').style.display = tab === 'swing' ? '' : 'none';
   $('dt-table').style.display    = tab === 'daytrade' ? '' : 'none';
 }
+
+// ============================================================
+//  コピー用テキスト生成
+// ============================================================
+function buildCopyText() {
+  if (!currentData) return '';
+  const d = currentData;
+  const ma = d.nikkei?.ma_status || '-';
+  const nk = d.nikkei?.close ? Number(d.nikkei.close).toLocaleString('ja-JP') : '-';
+  const lines = [`【スイング ${d.date} 日経${nk} ${ma}】`];
+
+  (d.swing || []).forEach((s, i) => {
+    const tp  = s.tp_price  ? `利:${fmtPrice(s.tp_price)}(${s.tp_pct!=null?(s.tp_pct>0?'+':'')+s.tp_pct+'%':'-'})` : '';
+    const sl  = s.sl_price  ? `損:${fmtPrice(s.sl_price)}(${s.sl_pct!=null?(s.sl_pct>0?'+':'')+s.sl_pct+'%':'-'})` : '';
+    const hvn = s.hvn_price ? `節目:${fmtPrice(s.hvn_price)}` : '';
+    const flags = [
+      s.macd_signal  ? 'MACD' : '',
+      s.counter_trend ? '逆張り' : '',
+      s.repechage     ? '⚡復活' : '',
+    ].filter(Boolean).join('/');
+    lines.push(`${i+1}. ${s.name}(${s.code}) ${s.direction} ${s.score}pt  ${tp}  ${sl}  ${hvn}${flags ? '  ['+flags+']' : ''}`);
+  });
+
+  if (d.hensho_triggered) lines.push('※ 変調検知発動');
+  return lines.join('\n');
+}
+
+$('btn-copy').addEventListener('click', async () => {
+  const text = buildCopyText();
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+    const btn = $('btn-copy');
+    btn.textContent = '✅ コピー済み';
+    btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = '📋 コピー'; btn.classList.remove('copied'); }, 2000);
+  } catch {
+    // フォールバック
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    $('btn-copy').textContent = '✅ コピー済み';
+    setTimeout(() => { $('btn-copy').textContent = '📋 コピー'; }, 2000);
+  }
+});
 
 // ============================================================
 //  チャートモーダル
