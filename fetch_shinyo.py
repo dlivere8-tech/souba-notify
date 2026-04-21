@@ -8,9 +8,12 @@ import json
 import time
 import re
 import os
+from pathlib import Path
 from bs4 import BeautifulSoup
 from datetime import datetime
 import pytz
+
+_HERE = Path(__file__).parent
 
 jst = pytz.timezone('Asia/Tokyo')
 now = datetime.now(jst).strftime('%Y-%m-%d %H:%M')
@@ -132,7 +135,7 @@ output = {
     "data": shinyo_data
 }
 
-with open("shinyo_cache.json", "w", encoding="utf-8") as f:
+with open(_HERE / "shinyo_cache.json", "w", encoding="utf-8") as f:
     json.dump(output, f, ensure_ascii=False, indent=2)
 
 print(f"\n完了: {success}銘柄取得 / {fail}銘柄失敗")

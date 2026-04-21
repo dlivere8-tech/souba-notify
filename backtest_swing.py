@@ -22,42 +22,44 @@
 import yfinance as yf
 import pandas as pd
 import numpy as np
+import duckdb
+from pathlib import Path
 from datetime import datetime, timedelta
 import time
 import csv
 import warnings
 warnings.filterwarnings('ignore')
 
+DB_PATH = Path(__file__).parent.parent / "stock_db" / "stock_prices.duckdb"
+
 # ─────────────────────────────────────────────
-# ユニバース（日経225）
+# ユニバース（ローカルDBから動的生成）
+# ETF・REIT除外、直近60日平均出来高でフィルター
 # ─────────────────────────────────────────────
-UNIVERSE = [
-    "1332","1333","1605","1721","1801","1802","1803","1808","1812","1925",
-    "1928","1963","2002","2269","2282","2413","2432","2501","2502","2503",
-    "2531","2578","2579","2587","2593","2695","2702","2801","2802","2871",
-    "2914","3086","3099","3105","3289","3382","3401","3402","3405","3407",
-    "3436","3659","3861","3863","3893","3941","4004","4005","4021","4042",
-    "4043","4061","4063","4151","4183","4188","4208","4324","4452","4502",
-    "4503","4506","4507","4519","4523","4543","4568","4578","4631","4642",
-    "4689","4704","4751","4755","4901","4902","4911","5001","5020","5101",
-    "5105","5108","5110","5201","5202","5214","5232","5233","5301","5332",
-    "5333","5401","5406","5411","5413","5423","5631","5703","5706","5707",
-    "5711","5713","5714","5715","5726","5727","5801","5802","5803","5901",
-    "6098","6103","6113","6146","6178","6273","6301","6302","6305","6326",
-    "6361","6367","6368","6369","6370","6471","6472","6473","6501","6503",
-    "6504","6506","6508","6586","6594","6645","6647","6674","6701","6702",
-    "6703","6706","6724","6752","6753","6758","6762","6770","6841","6857",
-    "6861","6902","6952","6954","6971","6976","6981","6988","7003","7004",
-    "7011","7012","7013","7182","7186","7201","7202","7203","7205","7206",
-    "7207","7211","7261","7267","7269","7270","7272","7731","7733","7735",
-    "7741","7751","7752","7762","7832","7911","7912","7974","8001","8002",
-    "8003","8015","8031","8035","8053","8058","8233","8252","8267","8303",
-    "8304","8306","8308","8309","8316","8411","8591","8601","8604","8630",
-    "8697","8725","8750","8766","8795","9001","9005","9007","9008","9009",
-    "9020","9021","9022","9064","9101","9104","9107","9202","9301","9412",
-    "9432","9433","9434","9501","9502","9503","9531","9532","9602","9613",
-    "9616","9735","9766","9983","9984",
-]
+MIN_AVG_VOLUME = 100_000  # 直近60日平均出来高の下限
+
+def _build_universe() -> list[str]:
+    con = duckdb.connect(str(DB_PATH), read_only=True)
+    rows = con.execute("""
+        SELECT p.code
+        FROM (
+            SELECT code, AVG(volume) AS avg_vol
+            FROM prices
+            WHERE date >= (CURRENT_DATE - INTERVAL '60' DAY)
+            GROUP BY code
+        ) p
+        JOIN download_status d ON p.code = d.code
+        WHERE p.avg_vol >= ?
+          AND d.status = 'done'
+          AND d.market NOT LIKE '%ETF%'
+          AND d.market NOT LIKE '%REIT%'
+          AND d.market NOT LIKE '%インフラ%'
+        ORDER BY p.code
+    """, [MIN_AVG_VOLUME]).fetchall()
+    con.close()
+    return [r[0] for r in rows]
+
+UNIVERSE = _build_universe()
 
 HOLD_DAYS       = 5
 TOP_N           = 10
@@ -1323,23 +1325,31 @@ if __name__ == '__main__':
     end_dt   = datetime.now() - timedelta(days=5)
     start_dt = end_dt - timedelta(days=400)
 
-    print(f"\n[1/3] 株価データ取得中（{len(UNIVERSE)}銘柄）...")
+    print(f"\n[1/3] 株価データ取得中（{len(UNIVERSE)}銘柄）... [ローカルDB]")
     all_data = {}
+    con = duckdb.connect(str(DB_PATH), read_only=True)
     for code in UNIVERSE:
         try:
-            df = yf.Ticker(f"{code}.T").history(
-                start=start_dt.strftime('%Y-%m-%d'),
-                end=(end_dt + timedelta(days=30)).strftime('%Y-%m-%d'),
-                auto_adjust=False
-            )
+            df = con.execute("""
+                SELECT date, open, high, low, close, volume
+                FROM prices
+                WHERE code = ?
+                  AND date >= ? AND date <= ?
+                ORDER BY date
+            """, [code,
+                  start_dt.strftime('%Y-%m-%d'),
+                  (end_dt + timedelta(days=30)).strftime('%Y-%m-%d')]).df()
+            if df.empty:
+                continue
+            df.columns = ['Date', 'Open', 'High', 'Low', 'Close', 'Volume']
+            df['Date'] = pd.to_datetime(df['Date'])
+            df = df.set_index('Date')
             if len(df) >= HIST_BARS + HOLD_DAYS + 20:
-                df.index = df.index.tz_localize(None)
                 all_data[code] = df
-                print(f"  {code}: {len(df)}本", end="\r")
         except Exception as e:
             print(f"  {code}: 取得失敗 ({e})")
-        time.sleep(0.15)
-    print(f"\n取得成功: {len(all_data)}銘柄")
+    con.close()
+    print(f"取得成功: {len(all_data)}銘柄")
 
     # ──── 日経平均データ取得 ────
     print("  日経平均（^N225）取得中...")

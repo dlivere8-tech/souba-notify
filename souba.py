@@ -1,6 +1,7 @@
 import yfinance as yf
 import pandas as pd
-import pandas_ta as ta
+import duckdb
+from pathlib import Path
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime
@@ -13,6 +14,74 @@ import time
 import numpy as np
 import re
 import json
+
+DB_PATH = Path(__file__).parent.parent / "stock_db" / "stock_prices.duckdb"
+_HERE = Path(__file__).parent
+
+# ── pandas_ta 代替実装（Python 3.14対応） ──────────────────────
+def _rsi_series(closes, period=14):
+    arr = np.asarray(closes, float)
+    out = np.full(len(arr), np.nan)
+    if len(arr) < period + 2:
+        return pd.Series(out, index=closes.index)
+    d = np.diff(arr)
+    g, l = np.where(d > 0, d, 0.0), np.where(d < 0, -d, 0.0)
+    ag, al = g[:period].mean(), l[:period].mean()
+    out[period] = 100.0 if al == 0 else 100.0 - 100.0 / (1.0 + ag / al)
+    for i in range(period, len(d)):
+        ag = (ag * (period - 1) + g[i]) / period
+        al = (al * (period - 1) + l[i]) / period
+        out[i + 1] = 100.0 if al == 0 else 100.0 - 100.0 / (1.0 + ag / al)
+    return pd.Series(out, index=closes.index)
+
+def _atr_series(highs, lows, closes, period=14):
+    h, l, c = np.asarray(highs, float), np.asarray(lows, float), np.asarray(closes, float)
+    out = np.full(len(h), np.nan)
+    if len(h) < period + 1:
+        return pd.Series(out, index=highs.index)
+    tr = np.maximum(h[1:] - l[1:], np.maximum(np.abs(h[1:] - c[:-1]), np.abs(l[1:] - c[:-1])))
+    v = tr[:period].mean()
+    out[period] = v
+    for i in range(period, len(tr)):
+        v = (v * (period - 1) + tr[i]) / period
+        out[i + 1] = v
+    return pd.Series(out, index=highs.index)
+
+def _bbands(closes, period=20, std=2):
+    arr = closes.values.astype(float)
+    lo, hi = np.full(len(arr), np.nan), np.full(len(arr), np.nan)
+    for i in range(period - 1, len(arr)):
+        sl = arr[i - period + 1:i + 1]
+        m, s = sl.mean(), sl.std(ddof=0)
+        lo[i], hi[i] = m - std * s, m + std * s
+    return pd.Series(lo, index=closes.index), pd.Series(hi, index=closes.index)
+
+def _ema(arr, period):
+    arr = np.asarray(arr, float)
+    if len(arr) < period:
+        return np.array([])
+    k, out = 2.0 / (period + 1), [arr[:period].mean()]
+    for v in arr[period:]:
+        out.append(v * k + out[-1] * (1 - k))
+    return np.array(out)
+
+def _macd_series(closes, fast=12, slow=26, signal=9):
+    arr = closes.values.astype(float)
+    idx = closes.index
+    empty = pd.Series(np.full(len(arr), np.nan), index=idx)
+    if len(arr) < slow + signal:
+        return empty, empty
+    e12, e26 = _ema(arr, fast), _ema(arr, slow)
+    macd = e26 - e12[fast - slow:]
+    if len(macd) < signal:
+        return empty, empty
+    sig = _ema(macd, signal)
+    macd_out = np.full(len(arr), np.nan)
+    sig_out  = np.full(len(arr), np.nan)
+    macd_out[slow - 1:] = macd
+    sig_out[slow + signal - 2:] = sig
+    return pd.Series(macd_out, index=idx), pd.Series(sig_out, index=idx)
+# ─────────────────────────────────────────────────────────────
 
 GMAIL_ADDRESS  = os.environ['GMAIL_ADDRESS']
 GMAIL_APP_PASS = os.environ['GMAIL_APP_PASS']
@@ -119,7 +188,7 @@ def load_shinyo_cache():
     ファイルが存在しない場合は空dictを返す。
     """
     try:
-        with open("shinyo_cache.json", "r", encoding="utf-8") as f:
+        with open(_HERE / "shinyo_cache.json", "r", encoding="utf-8") as f:
             cache = json.load(f)
         updated_at = cache.get("updated_at", "不明")
         data = cache.get("data", {})
@@ -191,21 +260,21 @@ MIN_TRADING_VALUE = 10  # 億円/日
 
 print(f"STEP 1：売買代金{MIN_TRADING_VALUE}億円以上の銘柄を抽出中...")
 
-filtered_stocks = []
-for code in nikkei225_codes:
-    try:
-        df = yf.Ticker(f"{code}.T").history(period="5d")
-        if df.empty or len(df) < 1: continue
-        latest = df.iloc[-1]
-        trading_value = latest['Volume'] * latest['Close'] / 1e8
-        if trading_value >= MIN_TRADING_VALUE:
-            filtered_stocks.append({
-                'code': code,
-                'trading_value': trading_value
-            })
-    except:
-        continue
-    time.sleep(0.05)
+_con = duckdb.connect(str(DB_PATH), read_only=True)
+_codes_str = ",".join(f"'{c}'" for c in nikkei225_codes)
+_rows = _con.execute(f"""
+    SELECT p.code, (p.close * p.volume / 1e8) AS trading_value
+    FROM prices p
+    INNER JOIN (
+        SELECT code, MAX(date) AS max_date
+        FROM prices
+        WHERE code IN ({_codes_str})
+        GROUP BY code
+    ) latest ON p.code = latest.code AND p.date = latest.max_date
+    WHERE (p.close * p.volume / 1e8) >= {MIN_TRADING_VALUE}
+""").fetchall()
+_con.close()
+filtered_stocks = [{'code': r[0], 'trading_value': r[1]} for r in _rows]
 
 # 名前取得
 candidate_stocks = []
@@ -331,12 +400,8 @@ def calc_support_resistance(df, curr, direction, atr_val):
 # ========================================
 def calc_macd_cross(df, direction):
     try:
-        macd_df = ta.macd(df['Close'], fast=12, slow=26, signal=9)
-        if macd_df is None or macd_df.empty: return 0
-        macd_col   = [c for c in macd_df.columns if 'MACD_' in c and 'MACDs' not in c and 'MACDh' not in c][0]
-        signal_col = [c for c in macd_df.columns if 'MACDs_' in c][0]
-        macd_line   = macd_df[macd_col].dropna()
-        signal_line = macd_df[signal_col].dropna()
+        macd_line, signal_line = _macd_series(df['Close'], fast=12, slow=26, signal=9)
+        macd_line, signal_line = macd_line.dropna(), signal_line.dropna()
         if len(macd_line) < 4: return 0
         for i in range(-3, 0):
             prev_diff = macd_line.iloc[i-1] - signal_line.iloc[i-1]
@@ -358,17 +423,25 @@ def calc_macd_cross(df, direction):
 # ========================================
 def calc_raw(code, name):
     try:
-        # 【変更】2年分取得
-        df = yf.Ticker(f"{code}.T").history(period="2y", auto_adjust=False)
+        # ローカルDBから2年分取得
+        _c = duckdb.connect(str(DB_PATH), read_only=True)
+        df = _c.execute("""
+            SELECT date AS Date, open AS Open, high AS High,
+                   low AS Low, close AS Close, volume AS Volume
+            FROM prices
+            WHERE code = ?
+              AND date >= (CURRENT_DATE - INTERVAL '2' YEAR)
+            ORDER BY date
+        """, [code]).df()
+        _c.close()
         if df.empty or len(df) < 60: return None
-        df.index = pd.to_datetime(df.index).tz_localize(None)
-        df = df.reset_index()
+        df['Date'] = pd.to_datetime(df['Date'])
 
-        df['RSI']  = ta.rsi(df['Close'], length=14)
+        df['RSI']  = _rsi_series(df['Close'], period=14)
         df['MA5']  = df['Close'].rolling(5).mean()
         df['MA25'] = df['Close'].rolling(25).mean()
         df['MA75'] = df['Close'].rolling(75).mean()
-        atr_series = ta.atr(df['High'], df['Low'], df['Close'], length=14)
+        atr_series = _atr_series(df['High'], df['Low'], df['Close'], period=14)
 
         recent = df.tail(20)
         latest = df.iloc[-1]
@@ -413,14 +486,10 @@ def calc_raw(code, name):
         # ---- ボリバン %B ----
         pct_b = None
         try:
-            bb_cols = ta.bbands(df['Close'], length=20, std=2)
-            if bb_cols is not None:
-                lower_col = [c for c in bb_cols.columns if 'BBL' in c][0]
-                upper_col = [c for c in bb_cols.columns if 'BBU' in c][0]
-                lower = bb_cols[lower_col].iloc[-1]
-                upper = bb_cols[upper_col].iloc[-1]
-                if upper != lower:
-                    pct_b = (curr - lower) / (upper - lower)
+            bb_lower, bb_upper = _bbands(df['Close'], period=20, std=2)
+            lower, upper = bb_lower.iloc[-1], bb_upper.iloc[-1]
+            if not np.isnan(lower) and not np.isnan(upper) and upper != lower:
+                pct_b = (curr - lower) / (upper - lower)
         except:
             pass
 
@@ -1061,7 +1130,8 @@ except Exception as e:
 # JSON保存（GitHub Pages Webアプリ用）
 # ========================================
 def save_json_results():
-    os.makedirs("docs/data", exist_ok=True)
+    data_dir = _HERE / "docs" / "data"
+    data_dir.mkdir(parents=True, exist_ok=True)
     today = datetime.now(pytz.timezone('Asia/Tokyo')).strftime('%Y-%m-%d')
 
     def _swing_entry(r):
@@ -1127,12 +1197,12 @@ def save_json_results():
     }
 
     # 日付別ファイル保存
-    fname = f"docs/data/results_{today}.json"
+    fname = data_dir / f"results_{today}.json"
     with open(fname, 'w', encoding='utf-8') as f:
         json.dump(result, f, ensure_ascii=False, indent=2)
 
     # index.json 更新（直近90日分）
-    index_path = "docs/data/index.json"
+    index_path = data_dir / "index.json"
     if os.path.exists(index_path):
         with open(index_path, 'r', encoding='utf-8') as f:
             index = json.load(f)
