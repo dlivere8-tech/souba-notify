@@ -1,0 +1,79 @@
+{
+  "date": "2026-04-22",
+  "generated_at": "2026-04-22 00:45",
+  "nikkei": {
+    "close": 58824.9,
+    "change_pct": "+0.60%",
+    "ma_status": "買い",
+    "market_trend": "買い"
+  },
+  "market": {
+    "dow": {
+      "value": 49356.9,
+      "change_pct": "-0.17%"
+    },
+    "sp500": {
+      "value": 7091.4,
+      "change_pct": "-0.25%"
+    },
+    "nasdaq": {
+      "value": 24373.2,
+      "change_pct": "-0.13%"
+    },
+    "usdjpy": {
+      "value": 159.43,
+      "change_pct": "+0.17%"
+    },
+    "vix": {
+      "value": 19.7,
+      "change_pct": "+4.40%"
+    }
+  },
+  "hensho_triggered": true,
+  "swing": [
+    {
+      "code": "8303",
+      "name": "ＳＢＩ新生銀行",
+      "price": 1658.0,
+      "change_pct": -0.99,
+      "direction": "売り",
+      "score": 57.6,
+      "rsi": 42.4,
+      "shinyo_ratio": 2985.44,
+      "tp_price": 1633.8,
+      "sl_price": 1682.2,
+      "tp_pct": -1.46,
+      "sl_pct": 1.46,
+      "tp_strength": 3,
+      "hvn_price": 1806.9,
+      "hvn_strength": 3,
+      "atr_pct": 2.75,
+      "ma_divergence": -6.5,
+      "counter_trend": true,
+      "repechage": false,
+      "macd_signal": true
+    }
+  ],
+  "daytrade": [
+    {
+      "code": "7205",
+      "name": "日野自動車",
+      "price": 385.0,
+      "change_pct": -0.52,
+      "direction": "売り",
+      "score": 65.0,
+      "rsi": 42.9,
+      "atr_pct": 6.44
+    },
+    {
+      "code": "8303",
+      "name": "ＳＢＩ新生銀行",
+      "price": 1658.0,
+      "change_pct": -0.99,
+      "direction": "売り",
+      "score": 48.9,
+      "rsi": 42.4,
+      "atr_pct": 2.75
+    }
+  ]
+}
