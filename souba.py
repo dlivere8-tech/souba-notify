@@ -332,12 +332,21 @@ if _target_date_row is None:
 
 _target_date = str(_target_date_row[0])
 _target_count = _target_date_row[1]
-_MIN_STOCKS = 3000  # この銘柄数を下回ったら不完全とみなす
 
-print(f"  DB最新日: {_target_date} / {_target_count}銘柄")
-if _target_count < _MIN_STOCKS:
-    print(f"エラー: {_target_date}のDBデータが不完全です（{_target_count}銘柄 < 最低{_MIN_STOCKS}銘柄）。")
-    print("daily_update.pyを実行してデータを補完してから再実行してください。")
+# 前日（または直前の取引日）の銘柄数を取得して相対的に完全性を判断
+_prev_row = _con.execute(f"""
+    SELECT date, COUNT(DISTINCT code) AS cnt
+    FROM prices
+    WHERE date < '{_target_date}'
+    GROUP BY date ORDER BY date DESC LIMIT 1
+""").fetchone()
+_prev_count = _prev_row[1] if _prev_row else 4000
+_MAX_DROP = 30   # 前日比でこの銘柄数より多く減っていたら不完全とみなす（廃止は通常1日1〜数件）
+
+print(f"  DB最新日: {_target_date} / {_target_count}銘柄 (前日: {_prev_count}銘柄, 差: {_prev_count - _target_count})")
+if _target_count < _prev_count - _MAX_DROP:
+    print(f"エラー: {_target_date}のDBデータが不完全です（前日比 -{_prev_count - _target_count}銘柄、許容は-{_MAX_DROP}まで）。")
+    print("run_daily.pyを実行してデータを補完してから再実行してください。")
     raise SystemExit(1)
 
 if BACKFILL_DATE and _target_date != BACKFILL_DATE:
