@@ -90,7 +90,12 @@ SEND_TO        = os.environ['SEND_TO']
 jst = pytz.timezone('Asia/Tokyo')
 now = datetime.now(jst)
 now_str = now.strftime('%Y-%m-%d %H:%M')
-print(f"実行開始: {now_str}")
+
+# 過去日付バックフィル用: SOUBA_DATE=2026-04-23 で指定可能
+_date_override = os.environ.get('SOUBA_DATE', '').strip()
+BACKFILL_DATE = _date_override if _date_override else None  # "YYYY-MM-DD" or None
+
+print(f"実行開始: {now_str}" + (f" [バックフィル: {BACKFILL_DATE}]" if BACKFILL_DATE else ""))
 
 headers = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -261,17 +266,43 @@ MIN_TRADING_VALUE = 10  # 億円/日
 print(f"STEP 1：売買代金{MIN_TRADING_VALUE}億円以上の銘柄を抽出中...")
 
 _con = duckdb.connect(str(DB_PATH), read_only=True)
+
+# DBの最新日付を確認（BACKFILL_DATE指定時はその日付）
+_date_cap_str = f"AND date <= '{BACKFILL_DATE}'" if BACKFILL_DATE else ""
+_target_date_row = _con.execute(f"""
+    SELECT date, COUNT(DISTINCT code) AS cnt
+    FROM prices
+    WHERE 1=1 {_date_cap_str}
+    GROUP BY date
+    ORDER BY date DESC
+    LIMIT 1
+""").fetchone()
+
+if _target_date_row is None:
+    print("エラー: DBにデータがありません。daily_update.pyを先に実行してください。")
+    raise SystemExit(1)
+
+_target_date = str(_target_date_row[0])
+_target_count = _target_date_row[1]
+_MIN_STOCKS = 3000  # この銘柄数を下回ったら不完全とみなす
+
+print(f"  DB最新日: {_target_date} / {_target_count}銘柄")
+if _target_count < _MIN_STOCKS:
+    print(f"エラー: {_target_date}のDBデータが不完全です（{_target_count}銘柄 < 最低{_MIN_STOCKS}銘柄）。")
+    print("daily_update.pyを実行してデータを補完してから再実行してください。")
+    raise SystemExit(1)
+
+if BACKFILL_DATE and _target_date != BACKFILL_DATE:
+    print(f"エラー: BACKFILL_DATE={BACKFILL_DATE} のデータが不完全です（最新は{_target_date}）。")
+    raise SystemExit(1)
+
 _codes_str = ",".join(f"'{c}'" for c in nikkei225_codes)
 _rows = _con.execute(f"""
     SELECT p.code, (p.close * p.volume / 1e8) AS trading_value
     FROM prices p
-    INNER JOIN (
-        SELECT code, MAX(date) AS max_date
-        FROM prices
-        WHERE code IN ({_codes_str})
-        GROUP BY code
-    ) latest ON p.code = latest.code AND p.date = latest.max_date
-    WHERE (p.close * p.volume / 1e8) >= {MIN_TRADING_VALUE}
+    WHERE p.date = '{_target_date}'
+      AND p.code IN ({_codes_str})
+      AND (p.close * p.volume / 1e8) >= {MIN_TRADING_VALUE}
 """).fetchall()
 _con.close()
 filtered_stocks = [{'code': r[0], 'trading_value': r[1]} for r in _rows]
@@ -425,12 +456,13 @@ def calc_raw(code, name):
     try:
         # ローカルDBから2年分取得
         _c = duckdb.connect(str(DB_PATH), read_only=True)
-        df = _c.execute("""
+        df = _c.execute(f"""
             SELECT date AS Date, open AS Open, high AS High,
                    low AS Low, close AS Close, volume AS Volume
             FROM prices
             WHERE code = ?
-              AND date >= (CURRENT_DATE - INTERVAL '2' YEAR)
+              AND date >= (DATE '{_target_date}' - INTERVAL '2' YEAR)
+              AND date <= '{_target_date}'
             ORDER BY date
         """, [code]).df()
         _c.close()
@@ -1116,15 +1148,18 @@ msg['To']      = SEND_TO
 msg['Subject'] = "Souba Data " + now_str
 msg.attach(MIMEText(html, 'html', 'utf-8'))
 
-try:
-    with smtplib.SMTP('smtp.gmail.com', 587) as smtp:
-        smtp.ehlo()
-        smtp.starttls()
-        smtp.login(GMAIL_ADDRESS, GMAIL_APP_PASS)
-        smtp.sendmail(GMAIL_ADDRESS, SEND_TO, msg.as_bytes())
-    print("メール送信完了！")
-except Exception as e:
-    print(f"メール送信失敗: {e}")
+if BACKFILL_DATE:
+    print(f"バックフィルモード: メール送信スキップ ({BACKFILL_DATE})")
+else:
+    try:
+        with smtplib.SMTP('smtp.gmail.com', 587) as smtp:
+            smtp.ehlo()
+            smtp.starttls()
+            smtp.login(GMAIL_ADDRESS, GMAIL_APP_PASS)
+            smtp.sendmail(GMAIL_ADDRESS, SEND_TO, msg.as_bytes())
+        print("メール送信完了！")
+    except Exception as e:
+        print(f"メール送信失敗: {e}")
 
 # ========================================
 # JSON保存（GitHub Pages Webアプリ用）
@@ -1132,7 +1167,7 @@ except Exception as e:
 def save_json_results():
     data_dir = _HERE / "docs" / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
-    today = datetime.now(pytz.timezone('Asia/Tokyo')).strftime('%Y-%m-%d')
+    today = BACKFILL_DATE if BACKFILL_DATE else datetime.now(pytz.timezone('Asia/Tokyo')).strftime('%Y-%m-%d')
 
     def _swing_entry(r):
         tp   = r.get('swing_res')
@@ -1218,18 +1253,21 @@ def save_json_results():
 
 save_json_results()
 
-# GitHub Pages へ自動プッシュ
+# GitHub Pages へ自動プッシュ（バックフィル時はまとめて後でpush）
 import subprocess
-try:
-    repo = str(_HERE)
-    subprocess.run(["git", "-C", repo, "add", "docs/data/"], check=True)
-    result = subprocess.run(["git", "-C", repo, "diff", "--staged", "--quiet"])
-    if result.returncode != 0:
-        subprocess.run(["git", "-C", repo, "commit", "-m", "Update results"], check=True)
-        subprocess.run(["git", "-C", repo, "pull", "--rebase", "--autostash", "origin", "main"], check=True)
-        subprocess.run(["git", "-C", repo, "push"], check=True)
-        print("GitHub Pages へプッシュ完了")
-    else:
-        print("変更なし: プッシュをスキップ")
-except Exception as e:
-    print(f"git push 失敗（メールは送信済み）: {e}")
+if BACKFILL_DATE:
+    print("バックフィルモード: git push は後でまとめて実行")
+else:
+    try:
+        repo = str(_HERE)
+        subprocess.run(["git", "-C", repo, "add", "docs/data/"], check=True)
+        result = subprocess.run(["git", "-C", repo, "diff", "--staged", "--quiet"])
+        if result.returncode != 0:
+            subprocess.run(["git", "-C", repo, "commit", "-m", "Update results"], check=True)
+            subprocess.run(["git", "-C", repo, "pull", "--rebase", "--autostash", "origin", "main"], check=True)
+            subprocess.run(["git", "-C", repo, "push"], check=True)
+            print("GitHub Pages へプッシュ完了")
+        else:
+            print("変更なし: プッシュをスキップ")
+    except Exception as e:
+        print(f"git push 失敗（メールは送信済み）: {e}")
