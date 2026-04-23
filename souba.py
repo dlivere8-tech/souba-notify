@@ -1226,7 +1226,7 @@ try:
     result = subprocess.run(["git", "-C", repo, "diff", "--staged", "--quiet"])
     if result.returncode != 0:
         subprocess.run(["git", "-C", repo, "commit", "-m", "Update results"], check=True)
-        subprocess.run(["git", "-C", repo, "pull", "--rebase", "origin", "main"], check=True)
+        subprocess.run(["git", "-C", repo, "pull", "--rebase", "--autostash", "origin", "main"], check=True)
         subprocess.run(["git", "-C", repo, "push"], check=True)
         print("GitHub Pages へプッシュ完了")
     else:
