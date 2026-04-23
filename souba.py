@@ -1217,3 +1217,19 @@ def save_json_results():
     print(f"JSON保存完了: {fname}")
 
 save_json_results()
+
+# GitHub Pages へ自動プッシュ
+import subprocess
+try:
+    repo = str(_HERE)
+    subprocess.run(["git", "-C", repo, "add", "docs/data/"], check=True)
+    result = subprocess.run(["git", "-C", repo, "diff", "--staged", "--quiet"])
+    if result.returncode != 0:
+        subprocess.run(["git", "-C", repo, "commit", "-m", "Update results"], check=True)
+        subprocess.run(["git", "-C", repo, "pull", "--rebase", "origin", "main"], check=True)
+        subprocess.run(["git", "-C", repo, "push"], check=True)
+        print("GitHub Pages へプッシュ完了")
+    else:
+        print("変更なし: プッシュをスキップ")
+except Exception as e:
+    print(f"git push 失敗（メールは送信済み）: {e}")
