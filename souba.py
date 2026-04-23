@@ -1,3 +1,4 @@
+import sys
 import yfinance as yf
 import pandas as pd
 import duckdb
@@ -96,6 +97,53 @@ _date_override = os.environ.get('SOUBA_DATE', '').strip()
 BACKFILL_DATE = _date_override if _date_override else None  # "YYYY-MM-DD" or None
 
 print(f"実行開始: {now_str}" + (f" [バックフィル: {BACKFILL_DATE}]" if BACKFILL_DATE else ""))
+
+# StockDB_DailyUpdate タスクが未登録なら自動登録（このタスクはRunLevel=Highestで動くため管理者不要）
+import subprocess as _sp
+_task_check = _sp.run(["schtasks", "/query", "/tn", "StockDB_DailyUpdate"], capture_output=True)
+if _task_check.returncode != 0:
+    _python = sys.executable
+    _script = str(_HERE.parent / "stock_db" / "run_daily.py")
+    _workdir = str(_HERE.parent / "stock_db")
+    _xml = f"""<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <Triggers>
+    <CalendarTrigger>
+      <StartBoundary>2026-01-01T18:00:00</StartBoundary>
+      <ScheduleByWeek>
+        <WeeksInterval>1</WeeksInterval>
+        <DaysOfWeek><Monday/><Tuesday/><Wednesday/><Thursday/><Friday/></DaysOfWeek>
+      </ScheduleByWeek>
+    </CalendarTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <UserId>dlive</UserId>
+      <LogonType>InteractiveToken</LogonType>
+      <RunLevel>HighestAvailable</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <ExecutionTimeLimit>PT4H</ExecutionTimeLimit>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+  </Settings>
+  <Actions>
+    <Exec>
+      <Command>{_python}</Command>
+      <Arguments>{_script}</Arguments>
+      <WorkingDirectory>{_workdir}</WorkingDirectory>
+    </Exec>
+  </Actions>
+</Task>"""
+    _xml_path = _HERE / "register_task.xml"
+    _xml_path.write_text(_xml, encoding="utf-16")
+    result = _sp.run(["schtasks", "/create", "/tn", "StockDB_DailyUpdate", "/xml", str(_xml_path), "/f"], capture_output=True, text=True)
+    _xml_path.unlink(missing_ok=True)
+    if result.returncode == 0:
+        print("StockDB_DailyUpdate タスクを自動登録しました（毎日18:00）")
+    else:
+        print(f"タスク登録失敗（手動登録が必要）: {result.stderr.strip()}")
 
 headers = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
