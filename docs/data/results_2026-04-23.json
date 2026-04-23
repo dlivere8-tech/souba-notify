@@ -1,6 +1,6 @@
 {
   "date": "2026-04-23",
-  "generated_at": "2026-04-24 00:43",
+  "generated_at": "2026-04-24 00:45",
   "nikkei": {
     "close": 59585.9,
     "change_pct": "+0.40%",
@@ -9,24 +9,24 @@
   },
   "market": {
     "dow": {
-      "value": 49400.9,
+      "value": 49399.2,
       "change_pct": "-0.18%"
     },
     "sp500": {
-      "value": 7135.4,
-      "change_pct": "-0.03%"
+      "value": 7134.3,
+      "change_pct": "-0.05%"
     },
     "nasdaq": {
-      "value": 24595.7,
-      "change_pct": "-0.25%"
+      "value": 24580.2,
+      "change_pct": "-0.31%"
     },
     "usdjpy": {
-      "value": 159.442,
-      "change_pct": "+0.04%"
+      "value": 159.427,
+      "change_pct": "+0.03%"
     },
     "vix": {
-      "value": 18.84,
-      "change_pct": "-0.42%"
+      "value": 18.97,
+      "change_pct": "+0.26%"
     }
   },
   "hensho_triggered": false,
@@ -208,28 +208,6 @@
       "macd_signal": false
     },
     {
-      "code": "2501",
-      "name": "Sapporo Hold",
-      "price": 1739.5,
-      "change_pct": -0.85,
-      "direction": "買い",
-      "score": 70.0,
-      "rsi": 43.4,
-      "shinyo_ratio": 0.17,
-      "tp_price": 1861.7,
-      "sl_price": 1617.3,
-      "tp_pct": 7.02,
-      "sl_pct": -7.02,
-      "tp_strength": 1,
-      "hvn_price": 1440.5,
-      "hvn_strength": 3,
-      "atr_pct": 2.81,
-      "ma_divergence": 3.79,
-      "counter_trend": false,
-      "repechage": false,
-      "macd_signal": false
-    },
-    {
       "code": "6305",
       "name": "Hitachi Cons",
       "price": 5490.0,
@@ -248,6 +226,28 @@
       "atr_pct": 3.22,
       "ma_divergence": -2.89,
       "counter_trend": true,
+      "repechage": false,
+      "macd_signal": false
+    },
+    {
+      "code": "8697",
+      "name": "Japan Exchan",
+      "price": 1851.0,
+      "change_pct": -0.46,
+      "direction": "買い",
+      "score": 70.0,
+      "rsi": 44.7,
+      "shinyo_ratio": 1.05,
+      "tp_price": 1922.0,
+      "sl_price": 1780.0,
+      "tp_pct": 3.84,
+      "sl_pct": -3.84,
+      "tp_strength": 1,
+      "hvn_price": 1714.4,
+      "hvn_strength": 3,
+      "atr_pct": 2.54,
+      "ma_divergence": 2.91,
+      "counter_trend": false,
       "repechage": false,
       "macd_signal": false
     }
@@ -314,16 +314,6 @@
       "atr_pct": 5.71
     },
     {
-      "code": "5801",
-      "name": "Furukawa Ele",
-      "price": 42530.0,
-      "change_pct": -3.45,
-      "direction": "売り",
-      "score": 91.1,
-      "rsi": 60.5,
-      "atr_pct": 6.11
-    },
-    {
       "code": "7012",
       "name": "Kawasaki Hea",
       "price": 3226.0,
@@ -332,6 +322,16 @@
       "score": 91.1,
       "rsi": 51.8,
       "atr_pct": 4.79
+    },
+    {
+      "code": "5801",
+      "name": "Furukawa Ele",
+      "price": 42530.0,
+      "change_pct": -3.45,
+      "direction": "売り",
+      "score": 91.1,
+      "rsi": 60.5,
+      "atr_pct": 6.11
     },
     {
       "code": "1605",
