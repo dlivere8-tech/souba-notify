@@ -1,6 +1,6 @@
 {
   "date": "2026-04-25",
-  "generated_at": "2026-04-25 10:48",
+  "generated_at": "2026-04-25 11:16",
   "nikkei": {
     "close": 59716.2,
     "change_pct": "+0.97%",
@@ -33,7 +33,7 @@
   "swing": [
     {
       "code": "2801",
-      "name": "キッコーマン",
+      "name": "Kikkoman Cor",
       "price": 1434.0,
       "change_pct": -1.04,
       "direction": "買い",
@@ -55,7 +55,7 @@
     },
     {
       "code": "4503",
-      "name": "アステラス製薬",
+      "name": "Astellas Pha",
       "price": 2468.0,
       "change_pct": -0.34,
       "direction": "買い",
@@ -77,7 +77,7 @@
     },
     {
       "code": "5423",
-      "name": "東京製鐵",
+      "name": "Tokyo Steel ",
       "price": 1703.0,
       "change_pct": -1.9,
       "direction": "買い",
@@ -187,7 +187,7 @@
     },
     {
       "code": "2702",
-      "name": "日本マクドナルドホールデ",
+      "name": "McDonald's H",
       "price": 8100.0,
       "change_pct": -0.25,
       "direction": "買い",
@@ -231,7 +231,7 @@
     },
     {
       "code": "4911",
-      "name": "資生堂",
+      "name": "Shiseido Com",
       "price": 3153.0,
       "change_pct": 1.61,
       "direction": "買い",
@@ -255,7 +255,7 @@
   "daytrade": [
     {
       "code": "5803",
-      "name": "フジクラ",
+      "name": "Fujikura Ltd",
       "price": 6037.0,
       "change_pct": 2.44,
       "direction": "買い",
@@ -265,7 +265,7 @@
     },
     {
       "code": "5802",
-      "name": "住友電気工業",
+      "name": "Sumitomo Ele",
       "price": 10015.0,
       "change_pct": -1.86,
       "direction": "売り",
@@ -295,7 +295,7 @@
     },
     {
       "code": "4004",
-      "name": "レゾナック・ホールディン",
+      "name": "Resonac Hold",
       "price": 13770.0,
       "change_pct": 0.15,
       "direction": "買い",
@@ -305,7 +305,7 @@
     },
     {
       "code": "5706",
-      "name": "三井金属",
+      "name": "Mitsui Kinzo",
       "price": 38660.0,
       "change_pct": 4.97,
       "direction": "買い",
@@ -315,7 +315,7 @@
     },
     {
       "code": "5801",
-      "name": "古河電気工業",
+      "name": "Furukawa Ele",
       "price": 42950.0,
       "change_pct": 0.99,
       "direction": "買い",
@@ -345,7 +345,7 @@
     },
     {
       "code": "3436",
-      "name": "ＳＵＭＣＯ",
+      "name": "Sumco Corpor",
       "price": 2242.0,
       "change_pct": 3.65,
       "direction": "買い",

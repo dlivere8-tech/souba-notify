@@ -88,6 +88,23 @@ GMAIL_ADDRESS  = os.environ['GMAIL_ADDRESS']
 GMAIL_APP_PASS = os.environ['GMAIL_APP_PASS']
 SEND_TO        = os.environ['SEND_TO']
 
+
+def _send_error_mail(subject: str, body: str):
+    try:
+        msg = MIMEMultipart()
+        msg['Subject'] = subject
+        msg['From']    = GMAIL_ADDRESS
+        msg['To']      = SEND_TO
+        msg.attach(MIMEText(body, 'plain', 'utf-8'))
+        with smtplib.SMTP('smtp.gmail.com', 587) as smtp:
+            smtp.ehlo(); smtp.starttls()
+            smtp.login(GMAIL_ADDRESS, GMAIL_APP_PASS)
+            smtp.sendmail(GMAIL_ADDRESS, SEND_TO, msg.as_bytes())
+        print(f"エラーメール送信: {subject}")
+    except Exception as e:
+        print(f"エラーメール送信失敗: {e}")
+
+
 jst = pytz.timezone('Asia/Tokyo')
 now = datetime.now(jst)
 now_str = now.strftime('%Y-%m-%d %H:%M')
@@ -119,7 +136,7 @@ if _task_check.returncode != 0:
   <Principals>
     <Principal id="Author">
       <UserId>dlive</UserId>
-      <LogonType>InteractiveToken</LogonType>
+      <LogonType>S4U</LogonType>
       <RunLevel>HighestAvailable</RunLevel>
     </Principal>
   </Principals>
@@ -309,7 +326,7 @@ def get_japanese_name(code):
 # 【変更②】STEP1：最低売買代金フィルター（上位50廃止）
 # 売買代金10億円/日以上の銘柄を全て対象にする
 # ========================================
-MIN_TRADING_VALUE = 10  # 億円/日
+MIN_TRADING_VALUE = 5  # 億円/日
 
 print(f"STEP 1：売買代金{MIN_TRADING_VALUE}億円以上の銘柄を抽出中...")
 
@@ -333,21 +350,43 @@ if _target_date_row is None:
 _target_date = str(_target_date_row[0])
 _target_count = _target_date_row[1]
 
-# 前日（または直前の取引日）の銘柄数を取得して相対的に完全性を判断
-_prev_row = _con.execute(f"""
-    SELECT date, COUNT(DISTINCT code) AS cnt
-    FROM prices
-    WHERE date < '{_target_date}'
-    GROUP BY date ORDER BY date DESC LIMIT 1
-""").fetchone()
-_prev_count = _prev_row[1] if _prev_row else 4000
-_MAX_DROP = 30   # 前日比でこの銘柄数より多く減っていたら不完全とみなす（廃止は通常1日1〜数件）
+# DBデータが古すぎないかチェック（バックフィルモード時はスキップ）
+if not BACKFILL_DATE:
+    from datetime import date as _date_cls
+    _days_old = (_date_cls.today() - _date_cls.fromisoformat(_target_date)).days
+    if _days_old > 4:  # 月曜7時なら前週金曜=3日前。4日超は明らかに異常
+        _msg = (f"DBの最新データが {_target_date}（{_days_old}日前）と古く、"
+                f"前日のDB更新が失敗した可能性があります。\n"
+                f"run_daily.log を確認してください。")
+        print(f"エラー: {_msg}")
+        _send_error_mail(f"[株価DB] DB更新失敗の疑い ({_target_date})", _msg)
+        raise SystemExit(1)
 
-print(f"  DB最新日: {_target_date} / {_target_count}銘柄 (前日: {_prev_count}銘柄, 差: {_prev_count - _target_count})")
-if _target_count < _prev_count - _MAX_DROP:
-    print(f"エラー: {_target_date}のDBデータが不完全です（前日比 -{_prev_count - _target_count}銘柄、許容は-{_MAX_DROP}まで）。")
-    print("run_daily.pyを実行してデータを補完してから再実行してください。")
+# backfill後の未取得数チェック: doneステータスの銘柄がpricesに存在するか確認
+_real_failures = _con.execute(f"""
+    SELECT COUNT(*) FROM download_status
+    WHERE status = 'done'
+      AND code NOT IN (SELECT code FROM prices WHERE date = '{_target_date}')
+""").fetchone()[0]
+_MAX_MISSING = 5
+
+_WARN_MISSING  = 10   # これ以上なら警告メール（処理は続行）
+_ABORT_MISSING = 200  # これ以上なら中断（yfinance全落ち疑い）
+
+print(f"  DB最新日: {_target_date} / {_target_count}銘柄 / 取得失敗: {_real_failures}銘柄")
+if _real_failures >= _ABORT_MISSING:
+    _msg = (f"{_target_date}のDB取得失敗が {_real_failures}銘柄と異常に多いです。\n"
+            f"yfinance障害の可能性があります。スクリーニングを中断します。")
+    print(f"中断: {_msg}")
+    if not BACKFILL_DATE:
+        _send_error_mail(f"[株価DB] yfinance障害疑い {_target_date} ({_real_failures}銘柄欠損)", _msg)
     raise SystemExit(1)
+elif _real_failures >= _WARN_MISSING:
+    _msg = (f"{_target_date}の取得失敗: {_real_failures}銘柄。\n"
+            f"スクリーニングは続行します。週次メンテで確認・補完してください。")
+    print(f"警告: {_msg}")
+    if not BACKFILL_DATE:
+        _send_error_mail(f"[株価DB] 取得失敗あり {_target_date} ({_real_failures}銘柄)", _msg)
 
 if BACKFILL_DATE and _target_date != BACKFILL_DATE:
     print(f"エラー: BACKFILL_DATE={BACKFILL_DATE} のデータが不完全です（最新は{_target_date}）。")
