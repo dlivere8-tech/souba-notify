@@ -353,14 +353,38 @@ _target_count = _target_date_row[1]
 # DBデータが古すぎないかチェック（バックフィルモード時はスキップ）
 if not BACKFILL_DATE:
     from datetime import date as _date_cls
-    _days_old = (_date_cls.today() - _date_cls.fromisoformat(_target_date)).days
-    if _days_old > 4:  # 月曜7時なら前週金曜=3日前。4日超は明らかに異常
-        _msg = (f"DBの最新データが {_target_date}（{_days_old}日前）と古く、"
+    import calendar as _calendar
+    _today_cls = _date_cls.today()
+    _db_date_cls = _date_cls.fromisoformat(_target_date)
+    _days_old = (_today_cls - _db_date_cls).days
+
+    # 営業日数で判定（土日を除く）
+    def _count_weekdays(d1, d2):
+        """d1からd2までの平日数（d1は含まない、d2は含む）"""
+        cnt = 0
+        cur = d1
+        while cur < d2:
+            cur = _date_cls.fromordinal(cur.toordinal() + 1)
+            if cur.weekday() < 5:  # 月〜金
+                cnt += 1
+        return cnt
+
+    _weekdays_old = _count_weekdays(_db_date_cls, _today_cls)
+
+    # 2営業日以上古い = DB更新が失敗している（月曜朝なら前週金曜=1営業日前が正常）
+    if _weekdays_old >= 2:
+        _msg = (f"DBの最新データが {_target_date}（{_days_old}日前、{_weekdays_old}営業日前）と古く、"
                 f"前日のDB更新が失敗した可能性があります。\n"
                 f"run_daily.log を確認してください。")
         print(f"エラー: {_msg}")
         _send_error_mail(f"[株価DB] DB更新失敗の疑い ({_target_date})", _msg)
         raise SystemExit(1)
+    elif _weekdays_old == 1:
+        # 1営業日前は正常（月曜朝=前週金曜、火〜金朝=前日）
+        print(f"  DBデータ: {_target_date}（前営業日）— 正常")
+    else:
+        # 同日 or 当日未取得
+        print(f"  DBデータ: {_target_date}（当日）— 正常")
 
 # backfill後の未取得数チェック: doneステータスの銘柄がpricesに存在するか確認
 _real_failures = _con.execute(f"""
@@ -1241,7 +1265,7 @@ html = (
 msg = MIMEMultipart('alternative')
 msg['From']    = GMAIL_ADDRESS
 msg['To']      = SEND_TO
-msg['Subject'] = "Souba Data " + now_str
+msg['Subject'] = f"Souba Data {now_str} [データ:{_target_date}]"
 msg.attach(MIMEText(html, 'html', 'utf-8'))
 
 if BACKFILL_DATE:
