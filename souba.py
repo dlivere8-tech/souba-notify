@@ -122,11 +122,15 @@ if _task_check.returncode != 0:
     _python = sys.executable
     _script = str(_HERE.parent / "stock_db" / "run_daily.py")
     _workdir = str(_HERE.parent / "stock_db")
+    # StartBoundaryを「明日の18:00」にすることで即時実行を防ぐ
+    # 過去日付（例: 2026-01-01T18:00:00）を設定すると即座に実行されてしまう
+    from datetime import date as _date_cls, timedelta as _timedelta
+    _tomorrow = (_date_cls.today() + _timedelta(days=1)).strftime('%Y-%m-%d')
     _xml = f"""<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <Triggers>
     <CalendarTrigger>
-      <StartBoundary>2026-01-01T18:00:00</StartBoundary>
+      <StartBoundary>{_tomorrow}T18:00:00</StartBoundary>
       <ScheduleByWeek>
         <WeeksInterval>1</WeeksInterval>
         <DaysOfWeek><Monday/><Tuesday/><Wednesday/><Thursday/><Friday/></DaysOfWeek>
@@ -141,7 +145,7 @@ if _task_check.returncode != 0:
     </Principal>
   </Principals>
   <Settings>
-    <ExecutionTimeLimit>PT4H</ExecutionTimeLimit>
+    <ExecutionTimeLimit>PT6H</ExecutionTimeLimit>
     <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
     <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
   </Settings>
@@ -158,7 +162,7 @@ if _task_check.returncode != 0:
     result = _sp.run(["schtasks", "/create", "/tn", "StockDB_DailyUpdate", "/xml", str(_xml_path), "/f"], capture_output=True, text=True)
     _xml_path.unlink(missing_ok=True)
     if result.returncode == 0:
-        print("StockDB_DailyUpdate タスクを自動登録しました（毎日18:00）")
+        print(f"StockDB_DailyUpdate タスクを自動登録しました（{_tomorrow} 18:00〜 毎営業日）")
     else:
         print(f"タスク登録失敗（手動登録が必要）: {result.stderr.strip()}")
 
