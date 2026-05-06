@@ -385,10 +385,10 @@ if not BACKFILL_DATE:
         raise SystemExit(1)
     elif _weekdays_old == 1:
         # 1営業日前は正常（月曜朝=前週金曜、火〜金朝=前日）
-        print(f"  DBデータ: {_target_date}（前営業日）— 正常")
+        print(f"  DBデータ: {_target_date}（前営業日）- 正常")
     else:
         # 同日 or 当日未取得
-        print(f"  DBデータ: {_target_date}（当日）— 正常")
+        print(f"  DBデータ: {_target_date}（当日）- 正常")
 
 # backfill後の未取得数チェック: doneステータスの銘柄がpricesに存在するか確認
 _real_failures = _con.execute(f"""
@@ -431,12 +431,16 @@ _rows = _con.execute(f"""
 _con.close()
 filtered_stocks = [{'code': r[0], 'trading_value': r[1]} for r in _rows]
 
-# 名前取得
+# 名前取得（DBから一括取得、スクレイピング不要）
+_con2 = duckdb.connect(str(DB_PATH), read_only=True)
+_name_map = {r[0]: r[1] for r in _con2.execute("SELECT code, name FROM download_status WHERE name IS NOT NULL AND name != ''").fetchall()}
+_con2.close()
+
 candidate_stocks = []
 for v in filtered_stocks:
-    name = get_japanese_name(v['code'])
+    name = _name_map.get(v['code']) or get_japanese_name(v['code'])  # DBになければフォールバック
     candidate_stocks.append((v['code'], name))
-    time.sleep(0.1)
+
 
 print(f"対象銘柄: {len(candidate_stocks)}銘柄（売買代金{MIN_TRADING_VALUE}億円以上）")
 
