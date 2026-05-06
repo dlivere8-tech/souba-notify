@@ -166,6 +166,60 @@ if _task_check.returncode != 0:
     else:
         print(f"タスク登録失敗（手動登録が必要）: {result.stderr.strip()}")
 
+# Souba_Notify タスクのトリガー時刻を 06:00 に自動修正
+from datetime import date as _date_cls, timedelta as _timedelta
+_SOUBA_TARGET_TIME = "06:00:00"
+_souba_check = _sp.run(["schtasks", "/query", "/tn", "Souba_Notify", "/fo", "LIST", "/v"],
+                        capture_output=True, text=True, encoding="cp932", errors="ignore")
+if _souba_check.returncode == 0 and "6:00:00" not in _souba_check.stdout:
+    _python = sys.executable
+    _script = str(_HERE / "souba.py")
+    _workdir = str(_HERE)
+    _tomorrow_s = (_date_cls.today() + _timedelta(days=1)).strftime('%Y-%m-%d')
+    _souba_xml = f"""<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.3" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <Principals>
+    <Principal id="Author">
+      <LogonType>S4U</LogonType>
+      <RunLevel>HighestAvailable</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <ExecutionTimeLimit>PT72H</ExecutionTimeLimit>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <WakeToRun>true</WakeToRun>
+    <UseUnifiedSchedulingEngine>true</UseUnifiedSchedulingEngine>
+  </Settings>
+  <Triggers>
+    <CalendarTrigger>
+      <StartBoundary>{_tomorrow_s}T{_SOUBA_TARGET_TIME}</StartBoundary>
+      <ScheduleByWeek>
+        <WeeksInterval>1</WeeksInterval>
+        <DaysOfWeek><Monday/><Tuesday/><Wednesday/><Thursday/><Friday/></DaysOfWeek>
+      </ScheduleByWeek>
+    </CalendarTrigger>
+  </Triggers>
+  <Actions>
+    <Exec>
+      <Command>{_python}</Command>
+      <Arguments>{_script}</Arguments>
+      <WorkingDirectory>{_workdir}</WorkingDirectory>
+    </Exec>
+  </Actions>
+</Task>"""
+    _souba_xml_path = _HERE / "souba_notify_task.xml"
+    _souba_xml_path.write_text(_souba_xml, encoding="utf-16")
+    _r = _sp.run(["schtasks", "/create", "/tn", "Souba_Notify", "/xml", str(_souba_xml_path), "/f"],
+                 capture_output=True, text=True)
+    _souba_xml_path.unlink(missing_ok=True)
+    if _r.returncode == 0:
+        print(f"Souba_Notify トリガーを {_SOUBA_TARGET_TIME[:5]} に修正しました")
+    else:
+        print(f"Souba_Notify 修正失敗: {_r.stderr.strip()}")
+
 headers = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
     "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
@@ -356,39 +410,45 @@ _target_count = _target_date_row[1]
 
 # DBデータが古すぎないかチェック（バックフィルモード時はスキップ）
 if not BACKFILL_DATE:
-    from datetime import date as _date_cls
-    import calendar as _calendar
     _today_cls = _date_cls.today()
     _db_date_cls = _date_cls.fromisoformat(_target_date)
-    _days_old = (_today_cls - _db_date_cls).days
 
-    # 営業日数で判定（土日を除く）
-    def _count_weekdays(d1, d2):
-        """d1からd2までの平日数（d1は含まない、d2は含む）"""
-        cnt = 0
-        cur = d1
-        while cur < d2:
-            cur = _date_cls.fromordinal(cur.toordinal() + 1)
-            if cur.weekday() < 5:  # 月〜金
-                cnt += 1
-        return cnt
+    # 実際の最終取引日をyfinanceで取得（祝日・連休を正しく判定）
+    try:
+        _n225 = yf.Ticker("^N225").history(period="5d", auto_adjust=False)
+        if not _n225.empty:
+            _last_trading = _n225.index[-1]
+            if hasattr(_last_trading, 'date'):
+                _last_trading = _last_trading.date()
+            else:
+                _last_trading = _last_trading.to_pydatetime().date()
+        else:
+            _last_trading = None
+    except Exception:
+        _last_trading = None
 
-    _weekdays_old = _count_weekdays(_db_date_cls, _today_cls)
-
-    # 2営業日以上古い = DB更新が失敗している（月曜朝なら前週金曜=1営業日前が正常）
-    if _weekdays_old >= 2:
-        _msg = (f"DBの最新データが {_target_date}（{_days_old}日前、{_weekdays_old}営業日前）と古く、"
-                f"前日のDB更新が失敗した可能性があります。\n"
-                f"run_daily.log を確認してください。")
+    if _last_trading and _db_date_cls < _last_trading:
+        # DBが最終取引日より古い = 前日更新失敗
+        _days_behind = (_last_trading - _db_date_cls).days
+        _msg = (f"DBの最新データが {_target_date}（最終取引日 {_last_trading} より{_days_behind}日古い）。\n"
+                f"DB更新が失敗した可能性があります。run_daily.log を確認してください。")
         print(f"エラー: {_msg}")
         _send_error_mail(f"[株価DB] DB更新失敗の疑い ({_target_date})", _msg)
         raise SystemExit(1)
-    elif _weekdays_old == 1:
-        # 1営業日前は正常（月曜朝=前週金曜、火〜金朝=前日）
-        print(f"  DBデータ: {_target_date}（前営業日）- 正常")
+    elif _last_trading and _db_date_cls == _last_trading:
+        print(f"  DBデータ: {_target_date}（最終取引日と一致）- 正常")
+    elif _last_trading and _db_date_cls > _last_trading:
+        # DBが取引日より新しい（通常ありえないが念のため）
+        print(f"  DBデータ: {_target_date}（当日最新）- 正常")
     else:
-        # 同日 or 当日未取得
-        print(f"  DBデータ: {_target_date}（当日）- 正常")
+        # yfinance取得失敗時はカレンダー日数で簡易チェック
+        _days_old = (_today_cls - _db_date_cls).days
+        if _days_old >= 5:
+            _msg = f"DBの最新データが {_target_date}（{_days_old}日前）と古すぎます。"
+            print(f"エラー: {_msg}")
+            _send_error_mail(f"[株価DB] DB更新失敗の疑い ({_target_date})", _msg)
+            raise SystemExit(1)
+        print(f"  DBデータ: {_target_date}（{_days_old}日前）- 正常（祝日チェック省略）")
 
 # backfill後の未取得数チェック: doneステータスの銘柄がpricesに存在するか確認
 _real_failures = _con.execute(f"""
