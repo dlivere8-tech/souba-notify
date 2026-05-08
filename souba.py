@@ -428,13 +428,26 @@ if not BACKFILL_DATE:
         _last_trading = None
 
     if _last_trading and _db_date_cls < _last_trading:
-        # DBが最終取引日より古い = 前日更新失敗
-        _days_behind = (_last_trading - _db_date_cls).days
-        _msg = (f"DBの最新データが {_target_date}（最終取引日 {_last_trading} より{_days_behind}日古い）。\n"
-                f"DB更新が失敗した可能性があります。run_daily.log を確認してください。")
-        print(f"エラー: {_msg}")
-        _send_error_mail(f"[株価DB] DB更新失敗の疑い ({_target_date})", _msg)
-        raise SystemExit(1)
+        # DBが最終取引日より古い場合
+        # → 1営業日前（前日）なら正常（朝6時時点では前日データが最新のことも多い）
+        # → 2営業日以上古ければ異常
+        _prev_trading = _n225.index[-2] if len(_n225) >= 2 else None
+        if _prev_trading is not None:
+            if hasattr(_prev_trading, 'date'):
+                _prev_trading = _prev_trading.date()
+            else:
+                _prev_trading = _prev_trading.to_pydatetime().date()
+        if _db_date_cls >= (_prev_trading or _last_trading):
+            # 1営業日前 = 正常（前日データで続行）
+            print(f"  DBデータ: {_target_date}（前営業日）- 正常")
+        else:
+            # 2営業日以上古い = 異常
+            _days_behind = (_last_trading - _db_date_cls).days
+            _msg = (f"DBの最新データが {_target_date}（最終取引日 {_last_trading} より{_days_behind}日古い）。\n"
+                    f"DB更新が失敗した可能性があります。run_daily.log を確認してください。")
+            print(f"エラー: {_msg}")
+            _send_error_mail(f"[株価DB] DB更新失敗の疑い ({_target_date})", _msg)
+            raise SystemExit(1)
     elif _last_trading and _db_date_cls == _last_trading:
         print(f"  DBデータ: {_target_date}（最終取引日と一致）- 正常")
     elif _last_trading and _db_date_cls > _last_trading:
