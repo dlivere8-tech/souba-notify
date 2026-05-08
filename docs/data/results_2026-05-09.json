@@ -1,6 +1,6 @@
 {
   "date": "2026-05-09",
-  "generated_at": "2026-05-09 00:13",
+  "generated_at": "2026-05-09 00:14",
   "nikkei": {
     "close": 62833.8,
     "change_pct": "+5.58%",
@@ -9,24 +9,24 @@
   },
   "market": {
     "dow": {
-      "value": 49597.3,
-      "change_pct": "+0.00%"
+      "value": 49593.0,
+      "change_pct": "-0.01%"
     },
     "sp500": {
-      "value": 7387.7,
-      "change_pct": "+0.69%"
+      "value": 7386.8,
+      "change_pct": "+0.68%"
     },
     "nasdaq": {
-      "value": 26130.4,
-      "change_pct": "+1.26%"
+      "value": 26129.2,
+      "change_pct": "+1.25%"
     },
     "usdjpy": {
-      "value": 156.622,
-      "change_pct": "+0.07%"
+      "value": 156.63,
+      "change_pct": "+0.08%"
     },
     "vix": {
-      "value": 17.38,
-      "change_pct": "+1.76%"
+      "value": 17.37,
+      "change_pct": "+1.70%"
     }
   },
   "hensho_triggered": false,
