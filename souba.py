@@ -171,7 +171,7 @@ from datetime import date as _date_cls, timedelta as _timedelta
 _SOUBA_TARGET_TIME = "06:00:00"
 _souba_check = _sp.run(["schtasks", "/query", "/tn", "Souba_Notify", "/fo", "LIST", "/v"],
                         capture_output=True, text=True, encoding="cp932", errors="ignore")
-if _souba_check.returncode == 0 and "6:00:00" not in _souba_check.stdout:
+if _souba_check.returncode == 0 and ("6:00:00" not in _souba_check.stdout or ("土曜日" not in _souba_check.stdout and "Saturday" not in _souba_check.stdout)):
     _python = sys.executable
     _script = str(_HERE / "souba.py")
     _workdir = str(_HERE)
@@ -181,7 +181,7 @@ if _souba_check.returncode == 0 and "6:00:00" not in _souba_check.stdout:
   <Principals>
     <Principal id="Author">
       <LogonType>S4U</LogonType>
-      <RunLevel>HighestAvailable</RunLevel>
+      <RunLevel>LeastPrivilege</RunLevel>
     </Principal>
   </Principals>
   <Settings>
@@ -198,7 +198,7 @@ if _souba_check.returncode == 0 and "6:00:00" not in _souba_check.stdout:
       <StartBoundary>{_tomorrow_s}T{_SOUBA_TARGET_TIME}</StartBoundary>
       <ScheduleByWeek>
         <WeeksInterval>1</WeeksInterval>
-        <DaysOfWeek><Monday/><Tuesday/><Wednesday/><Thursday/><Friday/></DaysOfWeek>
+        <DaysOfWeek><Tuesday/><Wednesday/><Thursday/><Friday/><Saturday/></DaysOfWeek>
       </ScheduleByWeek>
     </CalendarTrigger>
   </Triggers>
