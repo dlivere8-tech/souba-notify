@@ -166,12 +166,12 @@ if _task_check.returncode != 0:
     else:
         print(f"タスク登録失敗（手動登録が必要）: {result.stderr.strip()}")
 
-# Souba_Notify タスクのトリガー時刻を 06:00 に自動修正
+# Souba_Notify タスクのトリガー設定を自動修正（月〜金 19:00）
 from datetime import date as _date_cls, timedelta as _timedelta
-_SOUBA_TARGET_TIME = "06:00:00"
+_SOUBA_TARGET_TIME = "19:00:00"
 _souba_check = _sp.run(["schtasks", "/query", "/tn", "Souba_Notify", "/fo", "LIST", "/v"],
                         capture_output=True, text=True, encoding="cp932", errors="ignore")
-if _souba_check.returncode == 0 and ("6:00:00" not in _souba_check.stdout or ("土曜日" not in _souba_check.stdout and "Saturday" not in _souba_check.stdout)):
+if _souba_check.returncode == 0 and ("19:00:00" not in _souba_check.stdout or ("土曜日" in _souba_check.stdout or "Saturday" in _souba_check.stdout)):
     _python = sys.executable
     _script = str(_HERE / "souba.py")
     _workdir = str(_HERE)
@@ -187,7 +187,7 @@ if _souba_check.returncode == 0 and ("6:00:00" not in _souba_check.stdout or ("�
   <Settings>
     <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
     <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
-    <ExecutionTimeLimit>PT72H</ExecutionTimeLimit>
+    <ExecutionTimeLimit>PT3H</ExecutionTimeLimit>
     <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
     <StartWhenAvailable>true</StartWhenAvailable>
     <WakeToRun>true</WakeToRun>
@@ -198,7 +198,7 @@ if _souba_check.returncode == 0 and ("6:00:00" not in _souba_check.stdout or ("�
       <StartBoundary>{_tomorrow_s}T{_SOUBA_TARGET_TIME}</StartBoundary>
       <ScheduleByWeek>
         <WeeksInterval>1</WeeksInterval>
-        <DaysOfWeek><Tuesday/><Wednesday/><Thursday/><Friday/><Saturday/></DaysOfWeek>
+        <DaysOfWeek><Monday/><Tuesday/><Wednesday/><Thursday/><Friday/></DaysOfWeek>
       </ScheduleByWeek>
     </CalendarTrigger>
   </Triggers>
@@ -216,7 +216,7 @@ if _souba_check.returncode == 0 and ("6:00:00" not in _souba_check.stdout or ("�
                  capture_output=True, text=True)
     _souba_xml_path.unlink(missing_ok=True)
     if _r.returncode == 0:
-        print(f"Souba_Notify トリガーを {_SOUBA_TARGET_TIME[:5]} に修正しました")
+        print(f"Souba_Notify トリガーを 月〜金 {_SOUBA_TARGET_TIME[:5]} に修正しました")
     else:
         print(f"Souba_Notify 修正失敗: {_r.stderr.strip()}")
 
