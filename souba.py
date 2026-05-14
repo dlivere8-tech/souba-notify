@@ -16,8 +16,72 @@ import numpy as np
 import re
 import json
 
-DB_PATH = Path(__file__).parent.parent / "stock_db" / "stock_prices.duckdb"
 _HERE = Path(__file__).parent
+IS_CI = os.getenv('GITHUB_ACTIONS') == 'true'
+
+if IS_CI:
+    DB_PATH = Path('/tmp/stock_prices.duckdb')
+    _GDRIVE_FILE_ID    = os.getenv('GDRIVE_DB_FILE_ID', '')
+    _GDRIVE_CREDS_JSON = os.getenv('GOOGLE_CREDS', '')
+
+    # ── Google DriveからDBをダウンロード ──
+    print("Google DriveからDBをダウンロード中...", flush=True)
+    from gdrive import download_db, upload_db as _upload_db_to_gdrive
+    download_db(_GDRIVE_CREDS_JSON, _GDRIVE_FILE_ID, str(DB_PATH))
+
+    # ── yfinanceで最新日のデータをDBに追加（run_daily.py の代替） ──
+    print("yfinanceで最新株価をDB更新中...", flush=True)
+    import time as _time_mod
+    _update_con = duckdb.connect(str(DB_PATH))
+    _update_codes = [r[0] for r in _update_con.execute(
+        "SELECT code FROM download_status WHERE status='done' ORDER BY code"
+    ).fetchall()]
+    _BATCH = 100
+    _inserted_total = 0
+    for _bi in range(0, len(_update_codes), _BATCH):
+        _batch = _update_codes[_bi:_bi + _BATCH]
+        _tickers_str = " ".join(f"{c}.T" for c in _batch)
+        try:
+            _raw = yf.download(
+                _tickers_str, period="2d", auto_adjust=True,
+                group_by="ticker", threads=True, progress=False,
+            )
+        except Exception as _e:
+            print(f"  batch {_bi} DL error: {_e}")
+            continue
+        if _raw is None or _raw.empty:
+            continue
+        for _code in _batch:
+            _ticker = f"{_code}.T"
+            try:
+                _df = _raw[_ticker].copy() if len(_batch) > 1 else _raw.copy()
+                _df = _df.dropna(subset=["Close"]).reset_index()
+                _df.columns = [c[0].lower() if isinstance(c, tuple) else c.lower() for c in _df.columns]
+                _df["date"] = pd.to_datetime(_df["date"]).dt.tz_localize(None).dt.date
+                _df["code"] = _code
+                _df = _df[["code", "date", "open", "high", "low", "close", "volume"]]
+                if _df.empty:
+                    continue
+                _update_con.register("_upd", _df)
+                _update_con.execute("""
+                    INSERT INTO prices (code, date, open, high, low, close, volume)
+                    SELECT code, date, open, high, low, close, volume FROM _upd
+                    ON CONFLICT (code, date) DO UPDATE SET
+                        open=excluded.open, high=excluded.high, low=excluded.low,
+                        close=excluded.close, volume=excluded.volume
+                """)
+                _update_con.unregister("_upd")
+                _inserted_total += 1
+            except Exception:
+                pass
+        if _bi % 1000 == 0 and _bi > 0:
+            print(f"  DB更新進捗: {_bi}/{len(_update_codes)}...", flush=True)
+        _time_mod.sleep(2)
+    _update_con.close()
+    print(f"DB更新完了: {_inserted_total}銘柄", flush=True)
+
+else:
+    DB_PATH = Path(__file__).parent.parent / "stock_db" / "stock_prices.duckdb"
 
 # ── pandas_ta 代替実装（Python 3.14対応） ──────────────────────
 def _rsi_series(closes, period=14):
@@ -115,110 +179,6 @@ BACKFILL_DATE = _date_override if _date_override else None  # "YYYY-MM-DD" or No
 
 print(f"実行開始: {now_str}" + (f" [バックフィル: {BACKFILL_DATE}]" if BACKFILL_DATE else ""))
 
-# StockDB_DailyUpdate タスクが未登録なら自動登録（このタスクはRunLevel=Highestで動くため管理者不要）
-import subprocess as _sp
-_task_check = _sp.run(["schtasks", "/query", "/tn", "StockDB_DailyUpdate"], capture_output=True)
-if _task_check.returncode != 0:
-    _python = sys.executable
-    _script = str(_HERE.parent / "stock_db" / "run_daily.py")
-    _workdir = str(_HERE.parent / "stock_db")
-    # StartBoundaryを「明日の18:00」にすることで即時実行を防ぐ
-    # 過去日付（例: 2026-01-01T18:00:00）を設定すると即座に実行されてしまう
-    from datetime import date as _date_cls, timedelta as _timedelta
-    _tomorrow = (_date_cls.today() + _timedelta(days=1)).strftime('%Y-%m-%d')
-    _xml = f"""<?xml version="1.0" encoding="UTF-16"?>
-<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
-  <Triggers>
-    <CalendarTrigger>
-      <StartBoundary>{_tomorrow}T18:00:00</StartBoundary>
-      <ScheduleByWeek>
-        <WeeksInterval>1</WeeksInterval>
-        <DaysOfWeek><Monday/><Tuesday/><Wednesday/><Thursday/><Friday/></DaysOfWeek>
-      </ScheduleByWeek>
-    </CalendarTrigger>
-  </Triggers>
-  <Principals>
-    <Principal id="Author">
-      <UserId>dlive</UserId>
-      <LogonType>S4U</LogonType>
-      <RunLevel>HighestAvailable</RunLevel>
-    </Principal>
-  </Principals>
-  <Settings>
-    <ExecutionTimeLimit>PT6H</ExecutionTimeLimit>
-    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
-    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
-  </Settings>
-  <Actions>
-    <Exec>
-      <Command>{_python}</Command>
-      <Arguments>{_script}</Arguments>
-      <WorkingDirectory>{_workdir}</WorkingDirectory>
-    </Exec>
-  </Actions>
-</Task>"""
-    _xml_path = _HERE / "register_task.xml"
-    _xml_path.write_text(_xml, encoding="utf-16")
-    result = _sp.run(["schtasks", "/create", "/tn", "StockDB_DailyUpdate", "/xml", str(_xml_path), "/f"], capture_output=True, text=True)
-    _xml_path.unlink(missing_ok=True)
-    if result.returncode == 0:
-        print(f"StockDB_DailyUpdate タスクを自動登録しました（{_tomorrow} 18:00〜 毎営業日）")
-    else:
-        print(f"タスク登録失敗（手動登録が必要）: {result.stderr.strip()}")
-
-# Souba_Notify タスクのトリガー設定を自動修正（月〜金 19:00）
-from datetime import date as _date_cls, timedelta as _timedelta
-_SOUBA_TARGET_TIME = "19:00:00"
-_souba_check = _sp.run(["schtasks", "/query", "/tn", "Souba_Notify", "/fo", "LIST", "/v"],
-                        capture_output=True, text=True, encoding="cp932", errors="ignore")
-if _souba_check.returncode == 0 and ("19:00:00" not in _souba_check.stdout or ("土曜日" in _souba_check.stdout or "Saturday" in _souba_check.stdout)):
-    _python = sys.executable
-    _script = str(_HERE / "souba.py")
-    _workdir = str(_HERE)
-    _tomorrow_s = (_date_cls.today() + _timedelta(days=1)).strftime('%Y-%m-%d')
-    _souba_xml = f"""<?xml version="1.0" encoding="UTF-16"?>
-<Task version="1.3" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
-  <Principals>
-    <Principal id="Author">
-      <LogonType>S4U</LogonType>
-      <RunLevel>LeastPrivilege</RunLevel>
-    </Principal>
-  </Principals>
-  <Settings>
-    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
-    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
-    <ExecutionTimeLimit>PT3H</ExecutionTimeLimit>
-    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
-    <StartWhenAvailable>true</StartWhenAvailable>
-    <WakeToRun>true</WakeToRun>
-    <UseUnifiedSchedulingEngine>true</UseUnifiedSchedulingEngine>
-  </Settings>
-  <Triggers>
-    <CalendarTrigger>
-      <StartBoundary>{_tomorrow_s}T{_SOUBA_TARGET_TIME}</StartBoundary>
-      <ScheduleByWeek>
-        <WeeksInterval>1</WeeksInterval>
-        <DaysOfWeek><Monday/><Tuesday/><Wednesday/><Thursday/><Friday/></DaysOfWeek>
-      </ScheduleByWeek>
-    </CalendarTrigger>
-  </Triggers>
-  <Actions>
-    <Exec>
-      <Command>{_python}</Command>
-      <Arguments>{_script}</Arguments>
-      <WorkingDirectory>{_workdir}</WorkingDirectory>
-    </Exec>
-  </Actions>
-</Task>"""
-    _souba_xml_path = _HERE / "souba_notify_task.xml"
-    _souba_xml_path.write_text(_souba_xml, encoding="utf-16")
-    _r = _sp.run(["schtasks", "/create", "/tn", "Souba_Notify", "/xml", str(_souba_xml_path), "/f"],
-                 capture_output=True, text=True)
-    _souba_xml_path.unlink(missing_ok=True)
-    if _r.returncode == 0:
-        print(f"Souba_Notify トリガーを 月〜金 {_SOUBA_TARGET_TIME[:5]} に修正しました")
-    else:
-        print(f"Souba_Notify 修正失敗: {_r.stderr.strip()}")
 
 headers = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -493,13 +453,15 @@ if BACKFILL_DATE and _target_date != BACKFILL_DATE:
     print(f"エラー: BACKFILL_DATE={BACKFILL_DATE} のデータが不完全です（最新は{_target_date}）。")
     raise SystemExit(1)
 
-_codes_str = ",".join(f"'{c}'" for c in nikkei225_codes)
 _rows = _con.execute(f"""
     SELECT p.code, (p.close * p.volume / 1e8) AS trading_value
     FROM prices p
     WHERE p.date = '{_target_date}'
-      AND p.code IN ({_codes_str})
       AND (p.close * p.volume / 1e8) >= {MIN_TRADING_VALUE}
+      AND p.code NOT IN (
+          SELECT code FROM download_status WHERE status = 'delisted'
+      )
+    ORDER BY trading_value DESC
 """).fetchall()
 _con.close()
 filtered_stocks = [{'code': r[0], 'trading_value': r[1]} for r in _rows]

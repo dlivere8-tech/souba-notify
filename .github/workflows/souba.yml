@@ -1,7 +1,9 @@
 name: 毎朝相場通知
 
 on:
-  workflow_dispatch:  # ローカルPCのバッチファイルで実行するため自動スケジュールは無効化
+  schedule:
+    - cron: '0 21 * * 1-5'  # 毎営業日 21:00 UTC = 翌朝 6:00 JST
+  workflow_dispatch:  # 手動実行用
 
 jobs:
   notify:
@@ -20,7 +22,7 @@ jobs:
 
       - name: ライブラリインストール
         # エラー対策: 行の最後に pandas-ta を追加
-        run: pip install yfinance pandas requests beautifulsoup4 pytz gspread google-auth pandas-ta
+        run: pip install yfinance pandas requests beautifulsoup4 pytz gspread google-auth pandas-ta duckdb google-api-python-client
 
       - name: 相場通知実行
         env:
@@ -29,6 +31,7 @@ jobs:
           SEND_TO:        ${{ secrets.SEND_TO }}
           SHEET_ID:       ${{ secrets.SHEET_ID }}
           GOOGLE_CREDS:   ${{ secrets.GOOGLE_CREDS }}
+          GDRIVE_DB_FILE_ID:  ${{ secrets.GDRIVE_DB_FILE_ID }}
         run: python souba.py
 
       - name: JSONデータをコミット・プッシュ
@@ -39,3 +42,14 @@ jobs:
           git diff --staged --quiet || git commit -m "data: results $(date +'%Y-%m-%d')"
           git pull --rebase origin main
           git push
+
+      - name: DBをGoogle Driveにアップロード
+        env:
+          GOOGLE_CREDS: ${{ secrets.GOOGLE_CREDS }}
+          GDRIVE_DB_FILE_ID: ${{ secrets.GDRIVE_DB_FILE_ID }}
+        run: |
+          python - <<'EOF'
+          import os
+          from gdrive import upload_db
+          upload_db(os.environ['GOOGLE_CREDS'], os.environ['GDRIVE_DB_FILE_ID'], '/tmp/stock_prices.duckdb')
+          EOF
