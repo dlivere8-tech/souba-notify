@@ -5,7 +5,7 @@ import duckdb
 from pathlib import Path
 import requests
 from bs4 import BeautifulSoup
-from datetime import datetime
+from datetime import datetime, date, timedelta
 import pytz
 import smtplib
 from email.mime.text import MIMEText
@@ -21,57 +21,169 @@ IS_CI = os.getenv('GITHUB_ACTIONS') == 'true'
 
 if IS_CI:
     DB_PATH = Path('/tmp/stock_prices.duckdb')
-
-    # ── yfinanceで最新日のデータをDBに追加（run_daily.py の代替） ──
-    print("yfinanceで最新株価をDB更新中...", flush=True)
     import time as _time_mod
+
+    def _ci_send_error(subject, body):
+        """CI環境でのエラーメール送信（GMAIL_*環境変数が設定されている場合のみ）"""
+        try:
+            _gmail = os.environ.get('GMAIL_ADDRESS', '')
+            _pass  = os.environ.get('GMAIL_APP_PASS', '')
+            _to    = os.environ.get('SEND_TO', _gmail)
+            if not _gmail or not _pass:
+                print(f"エラーメール送信スキップ: {subject}")
+                return
+            import smtplib as _smtp_mod
+            from email.mime.text import MIMEText as _MIMEText
+            from email.mime.multipart import MIMEMultipart as _MIMEMultipart
+            _msg = _MIMEMultipart()
+            _msg['Subject'] = subject
+            _msg['From'] = _gmail
+            _msg['To']   = _to
+            _msg.attach(_MIMEText(body, 'plain', 'utf-8'))
+            with _smtp_mod.SMTP('smtp.gmail.com', 587) as _s:
+                _s.ehlo(); _s.starttls()
+                _s.login(_gmail, _pass)
+                _s.sendmail(_gmail, _to, _msg.as_bytes())
+            print(f"エラーメール送信: {subject}")
+        except Exception as _e:
+            print(f"エラーメール送信失敗: {_e}")
+
+    def _ci_batch_download(con, codes, period=None, start=None, end=None):
+        """バッチ単位でyfinanceからDLしてDBにupsert。(成功数, 失敗数) を返す。"""
+        _BATCH = 100
+        _fail_count = 0
+        _ok_count = 0
+        for _bi in range(0, len(codes), _BATCH):
+            _batch = codes[_bi:_bi + _BATCH]
+            _tickers_str = " ".join(f"{c}.T" for c in _batch)
+            try:
+                _kwargs = dict(auto_adjust=True, group_by="ticker", threads=True, progress=False)
+                if period:
+                    _kwargs["period"] = period
+                else:
+                    _kwargs["start"] = start
+                    _kwargs["end"]   = end
+                _raw = yf.download(_tickers_str, **_kwargs)
+            except Exception as _e:
+                print(f"  batch {_bi} DL error: {_e}")
+                _fail_count += len(_batch)
+                _time_mod.sleep(2)
+                continue
+            if _raw is None or _raw.empty:
+                _fail_count += len(_batch)
+                _time_mod.sleep(2)
+                continue
+            for _code in _batch:
+                _ticker = f"{_code}.T"
+                try:
+                    _df = _raw[_ticker].copy() if len(_batch) > 1 else _raw.copy()
+                    _df = _df.dropna(subset=["Close"]).reset_index()
+                    _df.columns = [c[0].lower() if isinstance(c, tuple) else c.lower() for c in _df.columns]
+                    _df["date"] = pd.to_datetime(_df["date"]).dt.tz_localize(None).dt.date
+                    _df["code"] = _code
+                    _df = _df[["code", "date", "open", "high", "low", "close", "volume"]]
+                    if _df.empty:
+                        _fail_count += 1
+                        continue
+                    con.register("_upd", _df)
+                    con.execute("""
+                        INSERT INTO prices (code, date, open, high, low, close, volume)
+                        SELECT code, date, open, high, low, close, volume FROM _upd
+                        ON CONFLICT (code, date) DO UPDATE SET
+                            open=excluded.open, high=excluded.high, low=excluded.low,
+                            close=excluded.close, volume=excluded.volume
+                    """)
+                    con.unregister("_upd")
+                    _ok_count += 1
+                except Exception:
+                    _fail_count += 1
+            if _bi % 1000 == 0 and _bi > 0:
+                print(f"  進捗: {_bi}/{len(codes)}...", flush=True)
+            _time_mod.sleep(2)
+        return _ok_count, _fail_count
+
+    # ── yfinanceで最新株価をDB更新（ギャップ検出・バックフィル対応） ──
+    print("yfinanceで最新株価をDB更新中...", flush=True)
     _update_con = duckdb.connect(str(DB_PATH))
     _update_codes = [r[0] for r in _update_con.execute(
         "SELECT code FROM download_status WHERE status='done' ORDER BY code"
     ).fetchall()]
-    _BATCH = 100
-    _inserted_total = 0
-    for _bi in range(0, len(_update_codes), _BATCH):
-        _batch = _update_codes[_bi:_bi + _BATCH]
-        _tickers_str = " ".join(f"{c}.T" for c in _batch)
-        try:
-            _raw = yf.download(
-                _tickers_str, period="2d", auto_adjust=True,
-                group_by="ticker", threads=True, progress=False,
-            )
-        except Exception as _e:
-            print(f"  batch {_bi} DL error: {_e}")
-            continue
-        if _raw is None or _raw.empty:
-            continue
-        for _code in _batch:
-            _ticker = f"{_code}.T"
-            try:
-                _df = _raw[_ticker].copy() if len(_batch) > 1 else _raw.copy()
-                _df = _df.dropna(subset=["Close"]).reset_index()
-                _df.columns = [c[0].lower() if isinstance(c, tuple) else c.lower() for c in _df.columns]
-                _df["date"] = pd.to_datetime(_df["date"]).dt.tz_localize(None).dt.date
-                _df["code"] = _code
-                _df = _df[["code", "date", "open", "high", "low", "close", "volume"]]
-                if _df.empty:
-                    continue
-                _update_con.register("_upd", _df)
-                _update_con.execute("""
-                    INSERT INTO prices (code, date, open, high, low, close, volume)
-                    SELECT code, date, open, high, low, close, volume FROM _upd
-                    ON CONFLICT (code, date) DO UPDATE SET
-                        open=excluded.open, high=excluded.high, low=excluded.low,
-                        close=excluded.close, volume=excluded.volume
-                """)
-                _update_con.unregister("_upd")
-                _inserted_total += 1
-            except Exception:
-                pass
-        if _bi % 1000 == 0 and _bi > 0:
-            print(f"  DB更新進捗: {_bi}/{len(_update_codes)}...", flush=True)
-        _time_mod.sleep(2)
+
+    # DBの現在の最新日付を確認
+    _db_max_row = _update_con.execute("SELECT MAX(date) FROM prices").fetchone()
+    _db_max_date = _db_max_row[0] if _db_max_row and _db_max_row[0] else None
+    print(f"  DBの現在の最新日: {_db_max_date} / 対象銘柄: {len(_update_codes)}銘柄", flush=True)
+
+    # 実際の取引日リストをyfinanceで取得（直近15日分）
+    try:
+        _n225_hist = yf.Ticker("^N225").history(period="15d", auto_adjust=False)
+        _trading_days = sorted(set(
+            _d.date() if hasattr(_d, 'date') else _d.to_pydatetime().date()
+            for _d in _n225_hist.index
+        ))
+        print(f"  取引日確認: {_trading_days}", flush=True)
+    except Exception as _e:
+        print(f"  取引日取得エラー: {_e}", flush=True)
+        _trading_days = []
+
+    # step1: period="2d"で直近2日を一括更新
+    print(f"  直近2日を一括DL中...", flush=True)
+    _ok1, _fail1 = _ci_batch_download(_update_con, _update_codes, period="2d")
+    print(f"  直近2日更新完了: 成功{_ok1}銘柄 / 失敗{_fail1}銘柄", flush=True)
+
+    # step2: ギャップ検出 - period="2d"で埋まらなかった欠落日をバックフィル
+    if _trading_days and _db_max_date:
+        _db_max_before = (
+            _db_max_date if isinstance(_db_max_date, date)
+            else date.fromisoformat(str(_db_max_date))
+        )
+        # 2d更新後のDB最新日を再取得
+        _db_max_now_row = _update_con.execute("SELECT MAX(date) FROM prices").fetchone()
+        _db_max_now = _db_max_now_row[0] if _db_max_now_row and _db_max_now_row[0] else _db_max_before
+        if not isinstance(_db_max_now, date):
+            _db_max_now = date.fromisoformat(str(_db_max_now))
+
+        # DBに存在しない取引日（最新日より古いもの）を特定
+        _last_trading = _trading_days[-1]  # 実際の最終取引日
+        _missing_days = [_td for _td in _trading_days if _td > _db_max_now]
+
+        if len(_missing_days) > 1:
+            # 最新日以外の欠落日をバックフィル（最新日は2dで取得済みのはず）
+            _backfill_days = _missing_days[:-1]
+            print(f"  ギャップ検出: {len(_backfill_days)}日分をバックフィル "
+                  f"({_backfill_days[0]} ～ {_backfill_days[-1]})", flush=True)
+            _total_gap_fail = 0
+            for _gd in _backfill_days:
+                print(f"    バックフィル: {_gd}...", flush=True)
+                _gok, _gfail = _ci_batch_download(
+                    _update_con, _update_codes,
+                    start=str(_gd),
+                    end=str(_gd + timedelta(days=1))
+                )
+                _total_gap_fail += _gfail
+                print(f"    {_gd}: 成功{_gok} / 失敗{_gfail}", flush=True)
+            if _total_gap_fail > 200:
+                _ci_send_error(
+                    f"[株価DB] CI バックフィル失敗 ({_total_gap_fail}銘柄欠損)",
+                    f"GitHub Actions のギャップバックフィルで合計{_total_gap_fail}銘柄が失敗しました。\n"
+                    f"対象日: {_backfill_days[0]} ～ {_backfill_days[-1]}\n"
+                    f"yfinance障害の可能性があります。"
+                )
+        elif _missing_days:
+            print(f"  {_missing_days[-1]} は2d取得済み（ギャップなし）", flush=True)
+        else:
+            print(f"  DBは最新 ({_db_max_now})", flush=True)
+
+    # step3: 直近2日の更新で失敗が多すぎる場合はエラーメール
+    if _fail1 > 200:
+        _ci_send_error(
+            f"[株価DB] CI DB更新失敗 ({_fail1}銘柄欠損)",
+            f"GitHub Actions のDB更新 (period=2d) で{_fail1}銘柄が失敗しました。\n"
+            f"yfinance障害の可能性があります。スクリーニング結果が不完全になる場合があります。"
+        )
+
     _update_con.close()
-    print(f"DB更新完了: {_inserted_total}銘柄", flush=True)
+    print(f"DB更新完了", flush=True)
 
 else:
     DB_PATH = Path(__file__).parent.parent / "stock_db" / "stock_prices.duckdb"
@@ -363,8 +475,8 @@ _target_count = _target_date_row[1]
 
 # DBデータが古すぎないかチェック（バックフィルモード時はスキップ）
 if not BACKFILL_DATE:
-    _today_cls = _date_cls.today()
-    _db_date_cls = _date_cls.fromisoformat(_target_date)
+    _today_cls = date.today()
+    _db_date_cls = date.fromisoformat(_target_date)
 
     # 実際の最終取引日をyfinanceで取得（祝日・連休を正しく判定）
     try:
