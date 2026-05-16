@@ -21,13 +21,6 @@ IS_CI = os.getenv('GITHUB_ACTIONS') == 'true'
 
 if IS_CI:
     DB_PATH = Path('/tmp/stock_prices.duckdb')
-    _GDRIVE_FILE_ID    = os.getenv('GDRIVE_DB_FILE_ID', '')
-    _GDRIVE_CREDS_JSON = os.getenv('GOOGLE_CREDS', '')
-
-    # ── Google DriveからDBをダウンロード ──
-    print("Google DriveからDBをダウンロード中...", flush=True)
-    from gdrive import download_db, upload_db as _upload_db_to_gdrive
-    download_db(_GDRIVE_CREDS_JSON, _GDRIVE_FILE_ID, str(DB_PATH))
 
     # ── yfinanceで最新日のデータをDBに追加（run_daily.py の代替） ──
     print("yfinanceで最新株価をDB更新中...", flush=True)

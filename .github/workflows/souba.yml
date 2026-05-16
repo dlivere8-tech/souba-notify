@@ -11,27 +11,45 @@ jobs:
     permissions:
       contents: write   # docs/data/ のコミット・プッシュに必要
     steps:
-      # Warning対策: v3 → v4 に更新
       - uses: actions/checkout@v4
 
       - name: Python セットアップ
-        # Warning対策: v4 → v5 に更新
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
       - name: ライブラリインストール
-        # エラー対策: 行の最後に pandas-ta を追加
-        run: pip install yfinance pandas requests beautifulsoup4 pytz gspread google-auth pandas-ta duckdb google-api-python-client
+        run: pip install yfinance pandas requests beautifulsoup4 pytz gspread google-auth pandas-ta duckdb
+
+      - name: 日付取得
+        id: date
+        run: echo "today=$(date -u +'%Y-%m-%d')" >> $GITHUB_OUTPUT
+
+      - name: DBキャッシュ復元
+        uses: actions/cache/restore@v4
+        with:
+          path: /tmp/stock_prices.duckdb
+          key: souba-db-${{ steps.date.outputs.today }}
+          restore-keys: |
+            souba-db-
+
+      - name: DB初回セットアップ（キャッシュなし時のみ）
+        run: |
+          if [ ! -f /tmp/stock_prices.duckdb ]; then
+            echo "DBが見つかりません。GitHubリリースから初期DBをDL..."
+            curl -fL -o /tmp/stock_prices.duckdb \
+              "https://github.com/${{ github.repository }}/releases/download/db-bootstrap/stock_prices.duckdb" \
+              || { echo "初期DBのDLに失敗しました。手順: https://github.com/${{ github.repository }}/releases/new でdb-bootstrapタグを作成してDBをアップロードしてください"; exit 1; }
+            echo "初期DB DL完了: $(du -sh /tmp/stock_prices.duckdb | cut -f1)"
+          else
+            echo "DB復元済み: $(du -sh /tmp/stock_prices.duckdb | cut -f1)"
+          fi
 
       - name: 相場通知実行
         env:
           GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
           GMAIL_APP_PASS: ${{ secrets.GMAIL_APP_PASS }}
           SEND_TO:        ${{ secrets.SEND_TO }}
-          SHEET_ID:       ${{ secrets.SHEET_ID }}
-          GOOGLE_CREDS:   ${{ secrets.GOOGLE_CREDS }}
-          GDRIVE_DB_FILE_ID:  ${{ secrets.GDRIVE_DB_FILE_ID }}
         run: python souba.py
 
       - name: JSONデータをコミット・プッシュ
@@ -43,13 +61,9 @@ jobs:
           git pull --rebase origin main
           git push
 
-      - name: DBをGoogle Driveにアップロード
-        env:
-          GOOGLE_CREDS: ${{ secrets.GOOGLE_CREDS }}
-          GDRIVE_DB_FILE_ID: ${{ secrets.GDRIVE_DB_FILE_ID }}
-        run: |
-          python - <<'EOF'
-          import os
-          from gdrive import upload_db
-          upload_db(os.environ['GOOGLE_CREDS'], os.environ['GDRIVE_DB_FILE_ID'], '/tmp/stock_prices.duckdb')
-          EOF
+      - name: DBキャッシュ保存
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: /tmp/stock_prices.duckdb
+          key: souba-db-${{ steps.date.outputs.today }}
