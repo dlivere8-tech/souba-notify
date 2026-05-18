@@ -508,10 +508,12 @@ if not BACKFILL_DATE:
         else:
             # 2営業日以上古い = 異常
             _days_behind = (_last_trading - _db_date_cls).days
-            _msg = (f"DBの最新データが {_target_date}（最終取引日 {_last_trading} より{_days_behind}日古い）。\n"
-                    f"DB更新が失敗した可能性があります。run_daily.log を確認してください。")
+            _msg = (f"【GitHub Actions 通知用DB】\n"
+                    f"DBの最新データが {_target_date}（最終取引日 {_last_trading} より{_days_behind}日古い）。\n"
+                    f"GitHub Actions の DB更新（IS_CIブロック）が失敗した可能性があります。\n"
+                    f"Actions のワークフローログを確認してください。")
             print(f"エラー: {_msg}")
-            _send_error_mail(f"[株価DB] DB更新失敗の疑い ({_target_date})", _msg)
+            _send_error_mail(f"[通知用DB/CI] DB更新失敗の疑い ({_target_date})", _msg)
             raise SystemExit(1)
     elif _last_trading and _db_date_cls == _last_trading:
         print(f"  DBデータ: {_target_date}（最終取引日と一致）- 正常")
@@ -522,9 +524,12 @@ if not BACKFILL_DATE:
         # yfinance取得失敗時はカレンダー日数で簡易チェック
         _days_old = (_today_cls - _db_date_cls).days
         if _days_old >= 5:
-            _msg = f"DBの最新データが {_target_date}（{_days_old}日前）と古すぎます。"
+            _msg = (f"【GitHub Actions 通知用DB】\n"
+                    f"DBの最新データが {_target_date}（{_days_old}日前）と古すぎます。\n"
+                    f"GitHub Actions の DB更新が失敗した可能性があります。\n"
+                    f"Actions のワークフローログを確認してください。")
             print(f"エラー: {_msg}")
-            _send_error_mail(f"[株価DB] DB更新失敗の疑い ({_target_date})", _msg)
+            _send_error_mail(f"[通知用DB/CI] DB更新失敗の疑い ({_target_date})", _msg)
             raise SystemExit(1)
         print(f"  DBデータ: {_target_date}（{_days_old}日前）- 正常（祝日チェック省略）")
 
@@ -545,14 +550,14 @@ if _real_failures >= _ABORT_MISSING:
             f"yfinance障害の可能性があります。スクリーニングを中断します。")
     print(f"中断: {_msg}")
     if not BACKFILL_DATE:
-        _send_error_mail(f"[株価DB] yfinance障害疑い {_target_date} ({_real_failures}銘柄欠損)", _msg)
+        _send_error_mail(f"[通知用DB/CI] yfinance障害疑い {_target_date} ({_real_failures}銘柄欠損)", _msg)
     raise SystemExit(1)
 elif _real_failures >= _WARN_MISSING:
     _msg = (f"{_target_date}の取得失敗: {_real_failures}銘柄。\n"
             f"スクリーニングは続行します。週次メンテで確認・補完してください。")
     print(f"警告: {_msg}")
     if not BACKFILL_DATE:
-        _send_error_mail(f"[株価DB] 取得失敗あり {_target_date} ({_real_failures}銘柄)", _msg)
+        _send_error_mail(f"[通知用DB/CI] 取得失敗あり {_target_date} ({_real_failures}銘柄)", _msg)
 
 if BACKFILL_DATE and _target_date != BACKFILL_DATE:
     print(f"エラー: BACKFILL_DATE={BACKFILL_DATE} のデータが不完全です（最新は{_target_date}）。")
