@@ -2,7 +2,7 @@ name: 毎朝相場通知
 
 on:
   schedule:
-    - cron: '0 21 * * 0-4'  # JST月〜金 6:00 = UTC日〜木 21:00
+    - cron: '0 21 * * 0-5'  # JST月〜土 6:00 = UTC日〜金 21:00（土朝=金曜結果）
   workflow_dispatch:  # 手動実行用
 
 jobs:
