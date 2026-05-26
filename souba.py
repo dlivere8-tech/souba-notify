@@ -131,29 +131,27 @@ if IS_CI:
     _ok1, _fail1 = _ci_batch_download(_update_con, _update_codes, period="2d")
     print(f"  直近2日更新完了: 成功{_ok1}銘柄 / 失敗{_fail1}銘柄", flush=True)
 
-    # step2: ギャップ検出 - period="2d"で埋まらなかった欠落日をバックフィル
-    if _trading_days and _db_max_date:
-        _db_max_before = (
-            _db_max_date if isinstance(_db_max_date, date)
-            else date.fromisoformat(str(_db_max_date))
+    # step2: period="2d"がカバーしない古い日付のみバックフィル
+    # period="2d"は直近2取引日をカバーするため、それより古い欠落のみが対象。
+    # こうすることで period="2d" と gap backfill の重複ダウンロードを防ぐ。
+    if _trading_days and len(_trading_days) >= 2:
+        # DBに存在する日付を確認（銘柄数100以上 = 有効データあり）
+        _existing_dates = set(
+            str(r[0]) for r in _update_con.execute("""
+                SELECT date FROM prices
+                WHERE date >= ?
+                GROUP BY date
+                HAVING COUNT(DISTINCT code) >= 100
+            """, [str(_trading_days[0])]).fetchall()
         )
-        # 2d更新後のDB最新日を再取得
-        _db_max_now_row = _update_con.execute("SELECT MAX(date) FROM prices").fetchone()
-        _db_max_now = _db_max_now_row[0] if _db_max_now_row and _db_max_now_row[0] else _db_max_before
-        if not isinstance(_db_max_now, date):
-            _db_max_now = date.fromisoformat(str(_db_max_now))
+        # period=2dより古い取引日（末尾2件を除いた範囲）でDBにないもの
+        _old_missing = [_td for _td in _trading_days[:-2] if str(_td) not in _existing_dates]
 
-        # DBに存在しない取引日（最新日より古いもの）を特定
-        _last_trading = _trading_days[-1]  # 実際の最終取引日
-        _missing_days = [_td for _td in _trading_days if _td > _db_max_now]
-
-        if len(_missing_days) > 1:
-            # 最新日以外の欠落日をバックフィル（最新日は2dで取得済みのはず）
-            _backfill_days = _missing_days[:-1]
-            print(f"  ギャップ検出: {len(_backfill_days)}日分をバックフィル "
-                  f"({_backfill_days[0]} ～ {_backfill_days[-1]})", flush=True)
+        if _old_missing:
+            print(f"  ギャップ検出: {len(_old_missing)}日分をバックフィル "
+                  f"({_old_missing[0]} ～ {_old_missing[-1]})", flush=True)
             _total_gap_fail = 0
-            for _gd in _backfill_days:
+            for _gd in _old_missing:
                 print(f"    バックフィル: {_gd}...", flush=True)
                 _gok, _gfail = _ci_batch_download(
                     _update_con, _update_codes,
@@ -164,20 +162,18 @@ if IS_CI:
                 print(f"    {_gd}: 成功{_gok} / 失敗{_gfail}", flush=True)
             if _total_gap_fail > 200:
                 _ci_send_error(
-                    f"[株価DB] CI バックフィル失敗 ({_total_gap_fail}銘柄欠損)",
+                    f"[通知用DB/CI] バックフィル失敗 ({_total_gap_fail}銘柄欠損)",
                     f"GitHub Actions のギャップバックフィルで合計{_total_gap_fail}銘柄が失敗しました。\n"
-                    f"対象日: {_backfill_days[0]} ～ {_backfill_days[-1]}\n"
+                    f"対象日: {_old_missing[0]} ～ {_old_missing[-1]}\n"
                     f"yfinance障害の可能性があります。"
                 )
-        elif _missing_days:
-            print(f"  {_missing_days[-1]} は2d取得済み（ギャップなし）", flush=True)
         else:
-            print(f"  DBは最新 ({_db_max_now})", flush=True)
+            print(f"  ギャップなし（直近2取引日より古いデータは最新）", flush=True)
 
     # step3: 直近2日の更新で失敗が多すぎる場合はエラーメール
     if _fail1 > 200:
         _ci_send_error(
-            f"[株価DB] CI DB更新失敗 ({_fail1}銘柄欠損)",
+            f"[通知用DB/CI] DB更新失敗 ({_fail1}銘柄欠損)",
             f"GitHub Actions のDB更新 (period=2d) で{_fail1}銘柄が失敗しました。\n"
             f"yfinance障害の可能性があります。スクリーニング結果が不完全になる場合があります。"
         )
