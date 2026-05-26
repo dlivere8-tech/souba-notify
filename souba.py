@@ -78,10 +78,15 @@ if IS_CI:
                 try:
                     _df = _raw[_ticker].copy() if len(_batch) > 1 else _raw.copy()
                     _df = _df.dropna(subset=["Close"]).reset_index()
+                    if _fail_count == 0 and _ok_count == 0:  # 最初の1銘柄だけカラムを表示
+                        print(f"  DEBUG columns before rename: {_df.columns.tolist()}", flush=True)
                     _df.columns = [c[0].lower() if isinstance(c, tuple) else c.lower() for c in _df.columns]
-                    # yfinanceバージョンによりインデックス名が"Date"/"Datetime"で異なる
-                    if "datetime" in _df.columns and "date" not in _df.columns:
-                        _df = _df.rename(columns={"datetime": "date"})
+                    if _fail_count == 0 and _ok_count == 0:
+                        print(f"  DEBUG columns after rename: {_df.columns.tolist()}", flush=True)
+                    # yfinanceバージョンによりインデックス名が"Date"/"Datetime"で異なる → 日付列を統一
+                    _date_col = next((c for c in _df.columns if c in ("date", "datetime", "timestamp", "index")), None)
+                    if _date_col and _date_col != "date":
+                        _df = _df.rename(columns={_date_col: "date"})
                     _df["date"] = pd.to_datetime(_df["date"]).dt.tz_localize(None).dt.date
                     _df["code"] = _code
                     _df = _df[["code", "date", "open", "high", "low", "close", "volume"]]
