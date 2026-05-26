@@ -79,6 +79,9 @@ if IS_CI:
                     _df = _raw[_ticker].copy() if len(_batch) > 1 else _raw.copy()
                     _df = _df.dropna(subset=["Close"]).reset_index()
                     _df.columns = [c[0].lower() if isinstance(c, tuple) else c.lower() for c in _df.columns]
+                    # yfinanceバージョンによりインデックス名が"Date"/"Datetime"で異なる
+                    if "datetime" in _df.columns and "date" not in _df.columns:
+                        _df = _df.rename(columns={"datetime": "date"})
                     _df["date"] = pd.to_datetime(_df["date"]).dt.tz_localize(None).dt.date
                     _df["code"] = _code
                     _df = _df[["code", "date", "open", "high", "low", "close", "volume"]]
