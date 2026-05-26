@@ -95,7 +95,11 @@ if IS_CI:
                     """)
                     con.unregister("_upd")
                     _ok_count += 1
-                except Exception:
+                except Exception as _ex:
+                    if _fail_count < 3:  # 最初の3件だけエラー内容を表示
+                        import traceback as _tb
+                        print(f"  [{_code}] 処理エラー: {type(_ex).__name__}: {_ex}", flush=True)
+                        _tb.print_exc()
                     _fail_count += 1
             if _bi % 1000 == 0 and _bi > 0:
                 print(f"  進捗: {_bi}/{len(codes)}...", flush=True)
