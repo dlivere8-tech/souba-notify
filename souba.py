@@ -78,12 +78,8 @@ if IS_CI:
                 try:
                     _df = _raw[_ticker].copy() if len(_batch) > 1 else _raw.copy()
                     _df = _df.dropna(subset=["Close"]).reset_index()
-                    if _fail_count == 0 and _ok_count == 0:  # 最初の1銘柄だけカラムを表示
-                        print(f"  DEBUG columns before rename: {_df.columns.tolist()}", flush=True)
                     _df.columns = [c[0].lower() if isinstance(c, tuple) else c.lower() for c in _df.columns]
-                    if _fail_count == 0 and _ok_count == 0:
-                        print(f"  DEBUG columns after rename: {_df.columns.tolist()}", flush=True)
-                    # yfinanceバージョンによりインデックス名が"Date"/"Datetime"で異なる → 日付列を統一
+                    # yfinanceバージョンによりインデックス名が"Date"/"Datetime"等で異なる → "date"に統一
                     _date_col = next((c for c in _df.columns if c in ("date", "datetime", "timestamp", "index")), None)
                     if _date_col and _date_col != "date":
                         _df = _df.rename(columns={_date_col: "date"})
@@ -103,11 +99,7 @@ if IS_CI:
                     """)
                     con.unregister("_upd")
                     _ok_count += 1
-                except Exception as _ex:
-                    if _fail_count < 3:  # 最初の3件だけエラー内容を表示
-                        import traceback as _tb
-                        print(f"  [{_code}] 処理エラー: {type(_ex).__name__}: {_ex}", flush=True)
-                        _tb.print_exc()
+                except Exception:
                     _fail_count += 1
             if _bi % 1000 == 0 and _bi > 0:
                 print(f"  進捗: {_bi}/{len(codes)}...", flush=True)
